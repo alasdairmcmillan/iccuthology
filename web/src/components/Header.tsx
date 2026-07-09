@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Screen } from "../App";
 
 export interface SearchNight {
-  label: string; // short date, e.g. "Jul 10"
+  date: string; // "2026-07-10" — jump target
+  label: string; // short date, e.g. "Fri · Jul 10"
   pct: string;
 }
 export interface SearchResult {
@@ -15,6 +16,7 @@ interface HeaderProps {
   screen: Screen;
   onSelectScreen: (s: Screen) => void;
   search: (query: string) => SearchResult[];
+  onGotoShow: (date: string) => void;
 }
 
 const TABS: { id: Screen; label: string }[] = [
@@ -23,10 +25,35 @@ const TABS: { id: Screen; label: string }[] = [
   { id: "about", label: "About" },
 ];
 
-export default function Header({ screen, onSelectScreen, search }: HeaderProps) {
+export default function Header({ screen, onSelectScreen, search, onGotoShow }: HeaderProps) {
   const [query, setQuery] = useState("");
-  const hasSearch = query.trim().length > 0;
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const hasSearch = open && query.trim().length > 0;
   const results = hasSearch ? search(query) : [];
+
+  // Dismiss the results panel on outside click or Escape (input keeps its text).
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const jump = (date: string) => {
+    setOpen(false);
+    setQuery("");
+    onGotoShow(date);
+  };
 
   return (
     <header className="header">
@@ -43,11 +70,15 @@ export default function Header({ screen, onSelectScreen, search }: HeaderProps) 
         ))}
       </nav>
       <div className="header-spacer" />
-      <div className="search-wrap">
+      <div className="search-wrap" ref={wrapRef}>
         <input
           className="search-input"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
           placeholder="Search for the song you're chasing..."
         />
         {hasSearch && (
@@ -56,10 +87,15 @@ export default function Header({ screen, onSelectScreen, search }: HeaderProps) 
               <div className="search-result" key={r.slug}>
                 <div className="search-song">{r.song}</div>
                 <div className="night-chips">
-                  {r.nights.map((n, i) => (
-                    <span className="night-chip mono" key={i}>
+                  {r.nights.map((n) => (
+                    <button
+                      className="night-chip mono"
+                      key={n.date}
+                      title={`Open ${n.label} on the Shows screen`}
+                      onClick={() => jump(n.date)}
+                    >
                       {n.label} <span className="pct">{n.pct}</span>
-                    </span>
+                    </button>
                   ))}
                 </div>
               </div>

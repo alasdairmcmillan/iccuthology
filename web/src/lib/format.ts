@@ -39,6 +39,14 @@ export function dateLabelShort(showdate: string): string {
   return `${MONTHS[m - 1]} ${d}, ${y}`;
 }
 
+/** "2026-07-10" -> "Fri · Jul 10" — compact, for run rows and search chips
+ *  where the year is clear from context. */
+export function dateLabelDay(showdate: string): string {
+  const [y, m, d] = showdate.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return `${WEEKDAYS[dt.getDay()]} · ${MONTHS[m - 1]} ${d}`;
+}
+
 /** "2026-07" -> "July, 2026" for schedule month headers. */
 export function monthLabel(yyyymm: string): string {
   const [y, m] = yyyymm.split("-").map(Number);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { postRun } from "../api";
 import type {
   Meta,
@@ -7,7 +7,7 @@ import type {
   SetlistPrediction,
   ShowReport,
 } from "../types";
-import { dateLabel, dateLabelShort, pct1 } from "../lib/format";
+import { dateLabel, dateLabelDay, dateLabelShort, pct1 } from "../lib/format";
 
 interface ShowsScreenProps {
   meta: Meta;
@@ -83,6 +83,24 @@ export default function ShowsScreen({
   const [setlistNight, setSetlistNight] = useState<string | null>(null);
   const [model, setModel] = useState(meta.headline_model);
   const [run, setRun] = useState<RunReport | null>(null);
+  const multiselectRef = useRef<HTMLDivElement | null>(null);
+
+  // Dismiss the night picker on outside click or Escape.
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (!multiselectRef.current?.contains(e.target as Node)) setDropdownOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [dropdownOpen]);
 
   const modelOptions = useMemo(
     () => deriveModelOptions(meta, showsByDate),
@@ -139,7 +157,7 @@ export default function ShowsScreen({
         <div className="label-caps" style={{ marginBottom: 8 }}>
           Build your run:
         </div>
-        <div className="multiselect">
+        <div className="multiselect" ref={multiselectRef}>
           <button className="multiselect-toggle" onClick={() => setDropdownOpen((o) => !o)}>
             <span className="multiselect-summary">{summary}</span>
             <span style={{ color: "var(--text-label)", fontSize: 11 }}>
@@ -192,7 +210,7 @@ export default function ShowsScreen({
             <div className="run-grid-row" key={r.slug}>
               <span className="r-song">{r.song}</span>
               <span className="run-p">{pct1(r.p_at_least_one)}</span>
-              <span className="run-night">{r.most_likely_night_date}</span>
+              <span className="run-night">{dateLabelDay(r.most_likely_night_date)}</span>
             </div>
           ))}
           {run && run.missing.length > 0 && (

@@ -139,6 +139,9 @@ a:hover {
   border-radius: var(--radius-sm);
   outline: none;
 }
+.search-input:focus {
+  border-color: var(--accent-a66);
+}
 .search-results {
   position: absolute;
   top: calc(100% + 6px);
@@ -173,6 +176,7 @@ a:hover {
   flex-wrap: wrap;
 }
 .night-chip {
+  cursor: pointer;
   background: var(--input-bg);
   border: 1px solid var(--border-card);
   color: var(--text-label);
@@ -180,6 +184,10 @@ a:hover {
   font-family: var(--font-mono);
   padding: 3px 7px;
   border-radius: 4px;
+}
+.night-chip:hover {
+  border-color: var(--accent-a66);
+  color: var(--text-secondary);
 }
 .night-chip .pct {
   color: var(--accent);
@@ -604,6 +612,13 @@ a:hover {
   border-radius: var(--radius-sm);
   outline: none;
 }
+.select:focus,
+.multiselect-toggle:focus-visible,
+.pager-btn:focus-visible,
+.tour-pill:focus-visible {
+  border-color: var(--accent-a66);
+  outline: none;
+}
 .set-section {
   margin-bottom: 16px;
 }
@@ -737,4 +752,40 @@ a:hover {
   font-family: var(--font-mono);
   font-size: 13px;
   padding: 40px 0;
+}
+
+/* --- Small screens ------------------------------------------------------ */
+@media (max-width: 720px) {
+  .page {
+    padding: 20px 16px 48px;
+  }
+  .header {
+    padding: 12px 16px;
+    gap: 12px;
+  }
+  /* Search drops to its own full-width row under the tabs. */
+  .search-wrap {
+    order: 3;
+    width: 100%;
+  }
+  .search-results {
+    width: 100%;
+  }
+  /* Numeric tables keep their column layout and scroll sideways inside
+     their card instead of stretching the page. */
+  .tour-table-card,
+  .shows-card {
+    overflow-x: auto;
+  }
+  .tour-grid-head,
+  .tour-grid-row {
+    min-width: 620px;
+  }
+  .run-grid-head,
+  .run-grid-row {
+    min-width: 460px;
+  }
+  .tour-side {
+    width: 100%;
+  }
 }

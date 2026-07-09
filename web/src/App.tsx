@@ -18,7 +18,7 @@ import Header, { type SearchResult } from "./components/Header";
 import ToursScreen from "./components/ToursScreen";
 import ShowsScreen from "./components/ShowsScreen";
 import AboutScreen from "./components/AboutScreen";
-import { dateLabelShort, pct } from "./lib/format";
+import { dateLabelDay, pct } from "./lib/format";
 
 export type Screen = "tours" | "shows" | "about";
 
@@ -105,7 +105,8 @@ export default function App() {
             seen.set(r.slug, entry);
           }
           entry.nights.push({
-            label: dateLabelShort(date).replace(/, \d{4}$/, ""),
+            date,
+            label: dateLabelDay(date),
             pct: pct(r.prob),
           });
         }
@@ -123,7 +124,7 @@ export default function App() {
 
   return (
     <>
-      <Header screen={screen} onSelectScreen={setScreen} search={search} />
+      <Header screen={screen} onSelectScreen={setScreen} search={search} onGotoShow={gotoShow} />
       <main className="page">
         {!loaded && <div className="loading">Loading predictions…</div>}
         {loaded && screen === "tours" && (
