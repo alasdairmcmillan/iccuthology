@@ -271,6 +271,115 @@ def llm_backtest_cmd(
     typer.echo(render_llm_backtest(result, song_model.name))
 
 
+@app.command()
+def epoch(
+    emit_github_output: bool = typer.Option(
+        False, "--emit-github-output", help="Append epoch=/changed= to $GITHUB_OUTPUT for CI gating"
+    ),
+    submitted: str = typer.Option(None, help="Submissions inbox dir (folded into the epoch)"),
+    model: str = typer.Option("heuristic", help="Publishing model (part of the epoch)"),
+    n_sims: int = typer.Option(2000, "--n-sims"),
+    seed: int = typer.Option(0),
+    half_life: int = typer.Option(50),
+    compare_models: str = typer.Option(None, "--compare-models", help="Extra per-show columns folded into the epoch, comma-separated (e.g. lr,gbm)"),
+) -> None:
+    """Print the current epoch and whether it differs from the last published one.
+
+    Cheap: reads DB state + the submissions manifest, no simulation. Gates the
+    publish workflow (deploy plan §6).
+    """
+    from .config import DATA_DIR
+    from .db import get_connection
+    from .epoch import emit_github_output as _emit
+    from .epoch import epoch_status
+
+    compare = [m.strip() for m in compare_models.split(",") if m.strip()] if compare_models else None
+    pointer = DATA_DIR / "predictions" / "latest.json"
+    status = epoch_status(
+        get_connection(), pointer_path=pointer, model=model, n_sims=n_sims,
+        seed=seed, half_life=half_life, compare_models=compare, submitted_dir=submitted,
+    )
+    typer.echo(f"epoch={status['epoch']} changed={'true' if status['changed'] else 'false'}")
+    if emit_github_output:
+        _emit(status["epoch"], status["changed"])
+
+
+@app.command()
+def publish(
+    out: str = typer.Option("build/snapshots", help="Output directory for the snapshot tree"),
+    n_sims: int = typer.Option(2000, "--n-sims", help="Monte-Carlo simulations"),
+    model: str = typer.Option("heuristic", help="Headline model: heuristic | lr | gbm"),
+    seed: int = typer.Option(0),
+    half_life: int = typer.Option(50),
+    with_samples: bool = typer.Option(False, "--with-samples", help="Also emit samples.bin + samples_meta.json"),
+    sample_sims: int = typer.Option(None, "--sample-sims", help="Ship a downsampled samples.bin of this many sims (tables keep --n-sims accuracy)"),
+    with_catalog: bool = typer.Option(False, "--with-catalog", help="Emit catalog.json (history for the personalized 'due to see' view)"),
+    compare_models: str = typer.Option(None, "--compare-models", help="Extra per-show columns, comma-separated (e.g. lr,gbm)"),
+    submitted: str = typer.Option(None, help="Submissions inbox dir to fold in as mcp:<label> sources"),
+) -> None:
+    """Compute every publishable artifact for the current epoch -> JSON (+ samples).
+
+    ONE simulation per epoch feeds the tour table and the raw samples; per-show
+    predictions + setlists reuse the existing library paths (deploy plan §3).
+    """
+    from .db import get_connection
+    from .publish import publish as _publish
+
+    compare = [m.strip() for m in compare_models.split(",") if m.strip()] if compare_models else None
+    meta = _publish(
+        get_connection(), out, n_sims=n_sims, model=model, seed=seed, half_life=half_life,
+        with_samples=with_samples, sample_sims=sample_sims, with_catalog=with_catalog,
+        compare_models=compare, submitted_dir=submitted,
+    )
+    typer.echo(f"published epoch {meta['epoch']} -> {out} ({len(meta['horizon_showdates'])} shows)")
+
+
+@app.command()
+def personal(
+    user: str = typer.Option(None, help="phish.net username — fetches your public seedfile"),
+    seedfile: str = typer.Option(None, help="Full seedfile URL (overrides --user)"),
+    dates: str = typer.Option(None, help="Explicit attended dates yyyy-mm-dd,... (offline, no fetch)"),
+    tour_name: str = typer.Option(None, "--tour", help="Restrict the horizon to a named tour"),
+    year: int = typer.Option(None, help="Horizon calendar year (default: current)"),
+    top: int = typer.Option(20, help="How many unseen songs to show"),
+    min_plays: int = typer.Option(20, help="Ignore songs with fewer historical plays"),
+    model: str = typer.Option("heuristic", help="heuristic | lr | gbm"),
+    n_sims: int = typer.Option(2000, "--n-sims"),
+    seed: int = typer.Option(0),
+    half_life: int = typer.Option(50),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of a table"),
+) -> None:
+    """Songs you're due to finally see: the most common songs you've never caught
+    live, with the odds you'll hear each over the upcoming horizon and the show
+    most likely to play it. A forward-looking complement to phish.net's stats.
+    """
+    from .db import get_connection
+    from .modes import resolve_tour_horizon
+    from .personal import fetch_seedfile, unlikely_unseen
+    from .simulate import SimConfig
+
+    if dates:
+        attended = [d.strip() for d in dates.split(",") if d.strip()]
+    elif seedfile or user:
+        try:
+            attended = fetch_seedfile(seedfile or user)
+        except Exception as exc:
+            typer.echo(f"Could not load seedfile: {exc}")
+            raise typer.Exit(1)
+    else:
+        typer.echo("Provide --user, --seedfile, or --dates")
+        raise typer.Exit(2)
+
+    conn = get_connection()
+    horizon = resolve_tour_horizon(conn, tour=tour_name, year=year)
+    if not horizon:
+        typer.echo("No future shows in the resolved horizon.")
+        raise typer.Exit(1)
+    cfg = SimConfig(n_sims=n_sims, seed=seed, model=model, half_life=half_life)
+    report = unlikely_unseen(conn, attended, horizon, cfg, top=top, min_plays=min_plays)
+    typer.echo(report.render(json_out=json_out))
+
+
 def main() -> None:
     app()
 

@@ -288,7 +288,11 @@ def _bucket_for(p_at_least_one: float, gap_ratio: float | None) -> str:
 
 
 def tour_mode(
-    conn: sqlite3.Connection, horizon_showids: list[int], config: SimConfig | None = None
+    conn: sqlite3.Connection,
+    horizon_showids: list[int],
+    config: SimConfig | None = None,
+    *,
+    result: SimResult | None = None,
 ) -> TourReport:
     """Mode 1 (plan §2): per-song expected plays, P(>=1 play), play-count
     distribution, and a lock/likely/longshot/bustout-watch bucket, reduced
@@ -296,9 +300,19 @@ def tour_mode(
     fast analytic sanity check (Sigma of per-show heuristic marginals -- an
     approximation that over-counts frequent songs since it ignores rotation
     cooldown; MC is the headline number).
+
+    Pass ``result`` (a precomputed ``SimResult`` over the same horizon) to reuse
+    an existing simulation instead of running a fresh one -- lets ``publish``
+    derive the tour table and the raw ``samples.bin`` from a SINGLE simulate run
+    per epoch (deploy plan §3 "compute the sims once, reduce many ways"). When
+    ``result`` is supplied its own ``config`` is authoritative, so the report's
+    model/n_sims/half_life metadata can never disagree with the samples.
     """
-    config = config or SimConfig()
-    result: SimResult = simulate_horizon(conn, horizon_showids, config)
+    if result is None:
+        config = config or SimConfig()
+        result = simulate_horizon(conn, horizon_showids, config)
+    else:
+        config = result.config
     n = len(result.samples)
     counts = _per_song_counts(result.samples)
 

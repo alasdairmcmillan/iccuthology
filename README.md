@@ -59,6 +59,36 @@ model-agnostic — `--provider anthropic|openai|google|openai-compat` — readin
 Models: `heuristic` (multiplicative baseline), `lr` (calibrated logistic
 regression — best Brier/log-loss in backtest), `gbm` (calibrated LightGBM).
 
+### Personalized "due to see"
+
+A forward-looking complement to phish.net's account stats: given the shows you've
+attended (your public phish.net seedfile, or explicit dates), the most common
+songs you've *never* caught live, with the odds you'll finally hear each over the
+upcoming horizon and the show most likely to play it.
+
+```bash
+phishpred personal --user apockalupsis          # fetches your public seedfile
+phishpred personal --dates 2024-08-06,2025-07-20 # explicit attended dates (offline)
+phishpred personal --user apockalupsis --tour "summer" --top 25 --json
+```
+
+### Publishing (deploy tier)
+
+Predictions are a batch artifact, not a live computation. `publish` computes every
+publishable JSON (+ raw `samples.bin`) for the current *epoch*; `epoch` gates the
+scheduled workflow so most runs no-op in seconds. See `phish-predictor-deploy-plan.md`,
+`DEPLOY-CONTRACTS.md`, and `docs/DEPLOY.md`.
+
+```bash
+phishpred epoch                                  # current epoch + whether it changed
+phishpred publish --out build/snapshots --with-samples   # full snapshot tree
+phishpred publish --out build/snapshots --with-samples --sample-sims 1000  # smaller client bin
+```
+
+The serve tier (`worker/`, a Cloudflare Worker over R2) and the React frontend
+(`web/`) consume these artifacts; the `phishpred-mcp` server (`docs/MCP.md`) lets
+an external agent submit predictions as extra comparison columns.
+
 **Predicting mid-run:** run `refresh` first so last night's setlist feeds the
 `played_prev_show` / `played_in_run` features. Predictions for later nights of
 a run cannot see earlier nights that haven't been played yet.
@@ -86,8 +116,10 @@ a run cannot see earlier nights that haven't been played yet.
 ## Development
 
 ```bash
-.venv/Scripts/python -m pytest -q     # 80 tests, no network required
+.venv/Scripts/python -m pytest -q     # Python suite, no network required
+cd worker && npm test                 # Worker samples.bin decoder + reductions
+cd web && npm run build               # React frontend typecheck + build
 ```
 
-Later phases (planned, not built): FastAPI + React frontend, Neon Postgres +
-Azure Container Apps deploy, play-money prediction market.
+Later phases (planned, not built): Cloudflare D1 + drift/compare timeline UI,
+play-money prediction market.

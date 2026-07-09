@@ -1,0 +1,39 @@
+name = "phish-predictor-worker"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# --- Static assets: the built React app (see ../web) -----------------------
+# Build the frontend first (`npm run build` in ../web`) so `../web/dist`
+# exists before `wrangler dev` / `wrangler deploy`.
+#
+# `run_worker_first` is scoped to /api/* only: everything else is served
+# directly from the assets binding (including the SPA fallback below), and
+# /api/* always invokes this Worker's fetch handler instead of falling back
+# to index.html. See DEPLOY-CONTRACTS.md §6.
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+# --- R2 bucket: published prediction snapshots ------------------------------
+# See DEPLOY-CONTRACTS.md §2/§4. Fill in `bucket_name` with the real R2 bucket
+# for this project, e.g.:
+#   wrangler r2 bucket create phish-predictor-snapshots
+#   wrangler r2 bucket create phish-predictor-snapshots-preview   # for `wrangler dev --remote` / preview
+[[r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "REPLACE_ME_R2_BUCKET_NAME"
+# preview_bucket_name = "REPLACE_ME_R2_BUCKET_NAME_PREVIEW"
+
+# --- Account / routing placeholders -----------------------------------------
+# Required for `wrangler deploy` outside a workers.dev-only setup. Fill in:
+#   account_id  = your Cloudflare account id (`wrangler whoami`)
+#   routes      = the custom domain/zone this Worker should answer on
+# Left commented so `wrangler deploy --dry-run` and local `wrangler dev` work
+# without Cloudflare credentials.
+# account_id = "REPLACE_ME_CLOUDFLARE_ACCOUNT_ID"
+# routes = [
+#   { pattern = "yourdomain.com/*", custom_domain = true }
+# ]

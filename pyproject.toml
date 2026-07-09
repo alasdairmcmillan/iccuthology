@@ -17,11 +17,16 @@ dependencies = [
     "pyarrow>=24.0.0",
 ]
 
+[project.optional-dependencies]
+deploy = ["boto3"]          # R2 push/pull (S3 API) for the publish workflow
+mcp = ["mcp>=1.0"]          # phishpred-mcp agent submission server
+
 [project.scripts]
 phishpred = "phishpred.cli:main"
+phishpred-mcp = "phishpred.mcp.server:main"
 
 [dependency-groups]
-dev = ["pytest"]
+dev = ["pytest", "boto3", "mcp>=1.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/phishpred"]

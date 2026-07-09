@@ -467,6 +467,23 @@ def future_run_start(conn: sqlite3.Connection, target_showid: int, target_venuei
     return min(indexed_member_indexes) if indexed_member_indexes else None
 
 
+def song_play_catalog(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Per-song global play-count catalog: songid/slug/name/plays/last_played
+    over non-excluded shows, most-played first.
+
+    Shared by ``publish._catalog`` (history for the personalized view) and
+    ``personal.unlikely_unseen`` (ranks unseen songs by lifetime plays) so the
+    two ranking sources can never drift apart.
+    """
+    return conn.execute(
+        "SELECT p.songid AS songid, so.slug AS slug, so.name AS name, "
+        "COUNT(*) AS plays, MAX(sh.showdate) AS last_played "
+        "FROM performances p JOIN songs so ON so.songid = p.songid "
+        "JOIN shows sh ON sh.showid = p.showid AND sh.exclude = 0 "
+        "GROUP BY p.songid ORDER BY plays DESC"
+    ).fetchall()
+
+
 def mean_setlist_size(conn: sqlite3.Connection, era: str | None = None) -> float:
     """Mean number of DISTINCT songids per non-excluded indexed show (= K).
 

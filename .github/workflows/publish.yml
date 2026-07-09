@@ -1,0 +1,71 @@
+name: publish-predictions
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # every 6h (UTC); off-tour runs no-op in seconds (epoch gate)
+  workflow_dispatch: {}
+
+concurrency: publish   # never overlap two publish runs
+
+env:
+  MODEL_PARAMS: "--model heuristic --n-sims 2000 --seed 0 --half-life 50"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Restore data from R2
+        run: uv run python scripts/r2_pull.py state/phish.db data/phish.db submitted/ data/predictions/submitted/ latest.json data/predictions/latest.json
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+
+      - name: Incremental refresh
+        run: uv run phishpred refresh
+        env:
+          PHISHNET_API_KEY: ${{ secrets.PHISHNET_API_KEY }}
+
+      - name: Compute epoch + gate
+        id: gate
+        run: uv run phishpred epoch --emit-github-output --submitted data/predictions/submitted $MODEL_PARAMS
+
+      - name: Publish snapshots
+        if: steps.gate.outputs.changed == 'true'
+        run: >
+          uv run phishpred publish --out build/snapshots $MODEL_PARAMS
+          --with-samples --with-catalog --submitted data/predictions/submitted
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Sync snapshot to R2
+        if: steps.gate.outputs.changed == 'true'
+        run: uv run python scripts/r2_push.py build/snapshots snapshots/${{ steps.gate.outputs.epoch }}
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+
+      - name: Update latest.json pointer
+        if: steps.gate.outputs.changed == 'true'
+        run: uv run python scripts/r2_push_pointer.py ${{ steps.gate.outputs.epoch }}
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+
+      - name: Persist updated DB to R2
+        if: steps.gate.outputs.changed == 'true'
+        run: uv run python scripts/r2_push.py data/phish.db state/phish.db
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
