@@ -7,6 +7,7 @@ even while those modules are stubs, and lets tests monkeypatch them cleanly.
 """
 from __future__ import annotations
 
+import io
 import json
 import math
 import sqlite3
@@ -14,6 +15,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date
 
 import pandas as pd
+from rich import box
 from rich.console import Console
 from rich.table import Table
 
@@ -270,7 +272,8 @@ def render_prediction(pred: ShowPrediction, json_out: bool = False) -> str:
             row["prob"] = round(row["prob"], 4)
         return json.dumps(payload)
 
-    console = Console(record=True, width=120)
+    # Render into a buffer only — the caller decides where the text goes.
+    console = Console(record=True, width=120, file=io.StringIO())
 
     location = ", ".join(part for part in (pred.city, pred.state) if part)
     header = f"{pred.showdate} - {pred.venue_name}"
@@ -279,7 +282,8 @@ def render_prediction(pred: ShowPrediction, json_out: bool = False) -> str:
     header += f" | model={pred.model}  K={pred.k:.1f}  half_life={pred.half_life}"
     console.print(header)
 
-    table = Table()
+    # ASCII box so output survives cp1252 stdout on Windows when redirected.
+    table = Table(box=box.ASCII)
     table.add_column("Song")
     table.add_column("Prob", justify="right")
     table.add_column("Gap", justify="right")
