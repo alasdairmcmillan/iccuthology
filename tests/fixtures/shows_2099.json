@@ -1,0 +1,27 @@
+{
+  "error": false,
+  "error_message": "",
+  "data": [
+    {
+      "showid": 2001,
+      "showyear": "2099",
+      "showmonth": 8,
+      "showday": 15,
+      "showdate": "2099-08-15",
+      "permalink": "https://phish.net/setlists/?d=2099-08-15",
+      "exclude_from_stats": 0,
+      "venueid": 30,
+      "venue": "Some Future Arena",
+      "city": "Nowhere",
+      "state": "XX",
+      "country": "USA",
+      "setlist_notes": "",
+      "tourid": 200,
+      "tour_name": "Future Tour",
+      "artistid": 1,
+      "artist_name": "Phish",
+      "created_at": "2026-01-01T00:00:00-04:00",
+      "updated_at": "2026-01-01T00:00:00-04:00"
+    }
+  ]
+}

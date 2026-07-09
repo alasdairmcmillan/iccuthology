@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "phish-predictor"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx",
+    "typer",
+    "rich",
+    "pandas",
+    "scikit-learn",
+    "lightgbm",
+    "python-dotenv",
+    "pyarrow>=24.0.0",
+]
+
+[project.scripts]
+phishpred = "phishpred.cli:main"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/phishpred"]

@@ -1,0 +1,26 @@
+{
+  "error": false,
+  "error_message": "",
+  "data": [
+    {
+      "venueid": 10,
+      "venuename": "Madison Square Garden",
+      "city": "New York",
+      "state": "NY",
+      "country": "USA",
+      "venuenotes": "",
+      "alias": 0,
+      "short_name": "MSG"
+    },
+    {
+      "venueid": 20,
+      "venuename": "Dick's Sporting Goods Park",
+      "city": "Commerce City",
+      "state": "CO",
+      "country": "USA",
+      "venuenotes": "",
+      "alias": 0,
+      "short_name": "Dick's"
+    }
+  ]
+}
