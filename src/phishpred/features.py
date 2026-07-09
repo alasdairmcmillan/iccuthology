@@ -111,6 +111,32 @@ class _State:
         self.era_song_plays: dict[tuple[str, int], int] = defaultdict(int)
         self.era_show_count: dict[str, int] = defaultdict(int)
 
+    def copy(self) -> "_State":
+        """Deep-enough copy so folding a hypothetical show into the copy (via
+        ``apply_show``) never mutates the original. ``songs_meta`` is read-only
+        and shared; every mutable container ``apply_show`` writes to is copied,
+        including nested lists (``play_indexes``, ``gaps``). Used by
+        ``simulate.py`` to fork one ``_State`` per Monte-Carlo simulation from a
+        common "built to now" baseline.
+        """
+        new = _State.__new__(_State)
+        new.songs_meta = self.songs_meta
+        new.r = self.r
+        new.ever_played = set(self.ever_played)
+        new.last_played = dict(self.last_played)
+        new.first_play = dict(self.first_play)
+        new.plays = defaultdict(int, self.plays)
+        new.play_indexes = defaultdict(list, {s: list(v) for s, v in self.play_indexes.items()})
+        new.gaps = defaultdict(list, {s: list(v) for s, v in self.gaps.items()})
+        new.median_gap = dict(self.median_gap)
+        new.num = dict(self.num)
+        new.venue_show_count = defaultdict(int, self.venue_show_count)
+        new.venue_last_ordinal = dict(self.venue_last_ordinal)
+        new.tour_play_count = defaultdict(int, self.tour_play_count)
+        new.era_song_plays = defaultdict(int, self.era_song_plays)
+        new.era_show_count = defaultdict(int, self.era_show_count)
+        return new
+
     def apply_show(self, t: int, venueid: int, tourid, era: str, setlist: set[int]) -> None:
         """Fold show T (index t) into the state. Call AFTER emitting T's rows."""
         r = self.r
@@ -214,6 +240,115 @@ def _new_cols() -> dict[str, list]:
 
 
 # ---------------------------------------------------------------------------
+# Reusable sweep/emit helpers (shared by features_for_future_show and
+# simulate.py — see CONTRACTS.md).
+# ---------------------------------------------------------------------------
+
+def build_state_to_now(conn: sqlite3.Connection, half_life: int = 50):
+    """Fold every non-excluded, indexed show into a fresh ``_State``.
+
+    Returns ``(state, D, max_index)``:
+    - ``state`` is ``None`` if there are no indexed shows.
+    - ``D`` is the emit-time denominator valid at ``max_index`` (i.e.
+      ``Sum_{indexed i < max_index} r ** (max_index - i)``) — the same
+      "denominator right before applying the most recent show" that the sweep
+      in ``build_features`` uses. To extrapolate to any later effective index
+      ``t``, use ``D_t = (r ** (t - max_index)) * (D + 1.0)``.
+    - ``max_index`` is the show_index of the most recent indexed show (0 if
+      there are none).
+
+    This is exactly the "build up to now" half of what used to be inline in
+    ``features_for_future_show``; it is the seed state for both a single
+    future-show prediction and every Monte-Carlo simulation in
+    ``simulate.py``.
+    """
+    r = 0.5 ** (1.0 / half_life)
+    shows = _load_shows(conn, indexed_only=True)
+    if not shows:
+        return None, 0.0, 0
+    setlists = _load_setlists(conn)
+    songs_meta = _load_songs(conn)
+
+    state = _State(songs_meta, r)
+    prev_t: int | None = None
+    D = 0.0
+    max_index = 0
+    for show in shows:
+        t = show["show_index"]
+        era = era_for_year(int(show["showdate"][:4]))
+        setlist = setlists.get(show["showid"], set())
+        if prev_t is None:
+            D = 0.0
+        else:
+            D = (r ** (t - prev_t)) * (D + 1.0)
+        state.apply_show(t, show["venueid"], show["tourid"], era, setlist)
+        prev_t = t
+        max_index = t
+    return state, D, max_index
+
+
+def emit_candidate_frame(
+    state: _State, *, index: int, showid: int, showdate: str, venueid: int,
+    tourid, era: str, run_start_index, D: float,
+) -> pd.DataFrame:
+    """Candidate rows (y = NaN) for one show at ``index``, given a ``_State``
+    already advanced up to (but not including) that show.
+
+    Wraps the body of ``_State.emit`` into a DataFrame. ``features_for_future_show``
+    calls this once; ``simulate.py`` calls it once per simulated horizon step
+    (on a *copy* of the state so sampling doesn't mutate other simulations).
+    """
+    cols = _new_cols()
+    state.emit(cols, index=index, showid=showid, showdate=showdate, venueid=venueid,
+               tourid=tourid, era=era, run_start_index=run_start_index, D=D, y_setlist=None)
+    return pd.DataFrame(cols)[_ALL_COLUMNS]
+
+
+def show_meta(conn: sqlite3.Connection, showids: list[int]) -> dict[int, sqlite3.Row]:
+    """showid -> row with showdate, tourid, venueid resolved to the canonical
+    (alias-aware) venueid, for the given showids. Same resolution
+    ``features_for_future_show`` applies to its single target show; exposed so
+    ``simulate.py`` can resolve a whole horizon's metadata in one query.
+    """
+    if not showids:
+        return {}
+    placeholders = ",".join("?" for _ in showids)
+    rows = conn.execute(
+        "SELECT s.showid AS showid, s.showdate AS showdate, s.tourid AS tourid, "
+        "COALESCE(NULLIF(v.alias, 0), s.venueid) AS venueid "
+        "FROM shows s LEFT JOIN venues v ON v.venueid = s.venueid "
+        f"WHERE s.showid IN ({placeholders})",
+        showids,
+    ).fetchall()
+    return {row["showid"]: row for row in rows}
+
+
+def future_show_ids(conn: sqlite3.Connection) -> list[int]:
+    """Not-yet-indexed, non-excluded showids dated after the last indexed show,
+    ordered by (showdate, showid).
+
+    A future show's effective show_index is ``max_index + 1 + rank`` where
+    ``rank`` is this list's 0-based position of that showid. Used by
+    ``features_for_future_show`` (single show) and ``simulate.py`` (whole
+    horizon) to compute effective indexes consistently.
+    """
+    last = conn.execute(
+        "SELECT showdate FROM shows WHERE show_index IS NOT NULL AND exclude = 0 "
+        "ORDER BY show_index DESC LIMIT 1"
+    ).fetchone()
+    if last is None:
+        return []
+    return [
+        row["showid"]
+        for row in conn.execute(
+            "SELECT showid FROM shows WHERE show_index IS NULL AND exclude = 0 "
+            "AND showdate > ? ORDER BY showdate, showid",
+            (last["showdate"],),
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -282,69 +417,32 @@ def features_for_future_show(
     already-played (indexed) nights of that run.
     """
     r = 0.5 ** (1.0 / half_life)
-    target = conn.execute(
-        "SELECT s.showid AS showid, s.showdate AS showdate, s.tourid AS tourid, "
-        "COALESCE(NULLIF(v.alias, 0), s.venueid) AS venueid "
-        "FROM shows s LEFT JOIN venues v ON v.venueid = s.venueid "
-        "WHERE s.showid = ?",
-        (showid,),
-    ).fetchone()
+    target = show_meta(conn, [showid]).get(showid)
     if target is None:
         return _empty_frame()
 
-    shows = _load_shows(conn, indexed_only=True)
-    if not shows:
+    state, D, max_index = build_state_to_now(conn, half_life)
+    if state is None:
         return _empty_frame()
-    setlists = _load_setlists(conn)
-    songs_meta = _load_songs(conn)
+    # D is the denominator evaluated at (just before) the last indexed show.
 
-    # Sweep all indexed shows to build final state; track denominator/last index.
-    state = _State(songs_meta, r)
-    prev_t: int | None = None
-    D = 0.0
-    max_index = 0
-    for show in shows:
-        t = show["show_index"]
-        era = era_for_year(int(show["showdate"][:4]))
-        setlist = setlists.get(show["showid"], set())
-        if prev_t is None:
-            D = 0.0
-        else:
-            D = (r ** (t - prev_t)) * (D + 1.0)
-        state.apply_show(t, show["venueid"], show["tourid"], era, setlist)
-        prev_t = t
-        max_index = t
-    # D now holds the denominator evaluated at the last indexed show.
-
-    max_indexed_date = conn.execute(
-        "SELECT showdate FROM shows WHERE show_index IS NOT NULL AND exclude = 0 "
-        "ORDER BY show_index DESC LIMIT 1"
-    ).fetchone()["showdate"]
-
-    future_ids = [
-        row["showid"]
-        for row in conn.execute(
-            "SELECT showid FROM shows WHERE show_index IS NULL AND exclude = 0 "
-            "AND showdate > ? ORDER BY showdate, showid",
-            (max_indexed_date,),
-        )
-    ]
+    future_ids = future_show_ids(conn)
     rank = future_ids.index(showid) if showid in future_ids else 0
     eff_index = max_index + 1 + rank
 
     D_eff = (r ** (eff_index - max_index)) * (D + 1.0)
 
-    run_start = _future_run_start(conn, showid, target["venueid"])
+    run_start = future_run_start(conn, showid, target["venueid"])
 
     era = era_for_year(int(target["showdate"][:4]))
-    cols = _new_cols()
-    state.emit(cols, index=eff_index, showid=showid, showdate=target["showdate"],
-               venueid=target["venueid"], tourid=target["tourid"], era=era,
-               run_start_index=run_start, D=D_eff, y_setlist=None)
-    return pd.DataFrame(cols)[_ALL_COLUMNS]
+    return emit_candidate_frame(
+        state, index=eff_index, showid=showid, showdate=target["showdate"],
+        venueid=target["venueid"], tourid=target["tourid"], era=era,
+        run_start_index=run_start, D=D_eff,
+    )
 
 
-def _future_run_start(conn: sqlite3.Connection, target_showid: int, target_venueid: int):
+def future_run_start(conn: sqlite3.Connection, target_showid: int, target_venueid: int):
     """Show_index of the earliest indexed show in the target's run, else None.
 
     The run is the contiguous block of shows at the same (canonical) venue that
