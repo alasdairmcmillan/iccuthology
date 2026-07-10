@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { postRun } from "../api";
+import { fetchScorecard, fetchScoreboard, postRun } from "../api";
 import type {
   Meta,
   RunReport,
   Schedule,
+  Scoreboard,
+  Scorecard,
+  ScorecardSource,
   SetlistPrediction,
   ShowReport,
 } from "../types";
@@ -91,6 +94,18 @@ export default function ShowsScreen({
   const [runPageRows] = useState(songPageSize);
   const multiselectRef = useRef<HTMLDivElement | null>(null);
 
+  // Past-scorecard mode (DEPLOY-CONTRACTS §8). Default view stays FUTURE
+  // predictions; the scoreboard is lazy-fetched on the first toggle and cached
+  // in this component's state so switching back and forth is instant.
+  const [mode, setMode] = useState<"upcoming" | "past">("upcoming");
+  const [scoreboard, setScoreboard] = useState<Scoreboard | null>(null);
+  const [scoreboardError, setScoreboardError] = useState<string | null>(null);
+  const [scoreboardLoading, setScoreboardLoading] = useState(false);
+  const [pastDate, setPastDate] = useState<string | null>(null);
+  const [pastModel, setPastModel] = useState<string | null>(null);
+  const [scorecards, setScorecards] = useState<Record<string, Scorecard>>({});
+  const [scorecardErrors, setScorecardErrors] = useState<Record<string, string>>({});
+
   // Dismiss the night picker on outside click or Escape.
   useEffect(() => {
     if (!dropdownOpen) return;
@@ -137,6 +152,62 @@ export default function ShowsScreen({
     };
   }, [sortedSelected.join(","), meta.headline_model]);
 
+  // Lazy-fetch the scoreboard the first time past mode is opened.
+  useEffect(() => {
+    if (mode !== "past" || scoreboard || scoreboardLoading || scoreboardError) return;
+    let cancelled = false;
+    setScoreboardLoading(true);
+    fetchScoreboard()
+      .then((sb) => {
+        if (!cancelled) setScoreboard(sb);
+      })
+      .catch((err) => {
+        if (!cancelled) setScoreboardError(err?.message ?? String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setScoreboardLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, scoreboard, scoreboardLoading, scoreboardError]);
+
+  // Selected past show — default to the most recent scored show (shows desc).
+  const activePastDate = useMemo(() => {
+    if (!scoreboard || scoreboard.shows.length === 0) return null;
+    if (pastDate && scoreboard.shows.some((s) => s.showdate === pastDate)) return pastDate;
+    return scoreboard.shows[0].showdate;
+  }, [scoreboard, pastDate]);
+
+  // Fetch (and cache) the selected show's scorecard.
+  useEffect(() => {
+    if (mode !== "past" || !activePastDate) return;
+    if (scorecards[activePastDate] || scorecardErrors[activePastDate]) return;
+    let cancelled = false;
+    fetchScorecard(activePastDate)
+      .then((sc) => {
+        if (!cancelled) setScorecards((m) => ({ ...m, [activePastDate]: sc }));
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setScorecardErrors((m) => ({ ...m, [activePastDate]: err?.message ?? String(err) }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, activePastDate, scorecards, scorecardErrors]);
+
+  const activeScorecard = activePastDate ? scorecards[activePastDate] ?? null : null;
+  const pastSourceKeys = activeScorecard ? Object.keys(activeScorecard.sources) : [];
+  // Model picker over the scorecard's own source keys; default heuristic.
+  const activePastModel = useMemo(() => {
+    if (pastSourceKeys.length === 0) return null;
+    if (pastModel && pastSourceKeys.includes(pastModel)) return pastModel;
+    return pastSourceKeys.includes("heuristic") ? "heuristic" : pastSourceKeys[0];
+  }, [pastSourceKeys.join(","), pastModel]);
+  const activeSource: ScorecardSource | null =
+    activePastModel && activeScorecard ? activeScorecard.sources[activePastModel] : null;
+
   // Keep the setlist night valid (first data-having selected night).
   const activeNight =
     setlistNight && dataShows.includes(setlistNight) ? setlistNight : dataShows[0] ?? null;
@@ -167,6 +238,28 @@ export default function ShowsScreen({
 
   return (
     <>
+      {/* Mode toggle — future predictions (default) vs. past scorecards (§8). */}
+      <div className="mode-toggle" role="tablist" aria-label="Prediction mode">
+        <button
+          className={"mode-option" + (mode === "upcoming" ? " active" : "")}
+          role="tab"
+          aria-selected={mode === "upcoming"}
+          onClick={() => setMode("upcoming")}
+        >
+          Upcoming
+        </button>
+        <button
+          className={"mode-option" + (mode === "past" ? " active" : "")}
+          role="tab"
+          aria-selected={mode === "past"}
+          onClick={() => setMode("past")}
+        >
+          Past scorecards
+        </button>
+      </div>
+
+      {mode === "upcoming" && (
+      <>
       <div style={{ marginBottom: 26 }}>
         <div className="label-caps" style={{ marginBottom: 8 }}>
           Build your run:
@@ -340,6 +433,196 @@ export default function ShowsScreen({
           )}
         </div>
       </div>
+      </>
+      )}
+
+      {mode === "past" &&
+        (scoreboardError ? (
+          <div className="note">Couldn't load the scoreboard: {scoreboardError}</div>
+        ) : !scoreboard ? (
+          <div className="center-msg">Loading scorecards…</div>
+        ) : scoreboard.shows.length === 0 ? (
+          <div className="center-msg">
+            No scored shows yet — check back after the first night.
+          </div>
+        ) : (
+          <>
+            <div className="setlist-controls" style={{ marginBottom: 24 }}>
+              <div className="control">
+                <span className="control-label">Show:</span>
+                <select
+                  className="select"
+                  value={activePastDate ?? ""}
+                  onChange={(e) => setPastDate(e.target.value)}
+                >
+                  {scoreboard.shows.map((s) => (
+                    <option key={s.showdate} value={s.showdate}>
+                      {dateLabelShort(s.showdate)} · {s.venue_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="control">
+                <span className="control-label">Model:</span>
+                <select
+                  className="select"
+                  value={activePastModel ?? ""}
+                  onChange={(e) => setPastModel(e.target.value)}
+                  disabled={pastSourceKeys.length === 0}
+                >
+                  {pastSourceKeys.map((key) => {
+                    const src = activeScorecard!.sources[key];
+                    const label =
+                      src.kind !== "statistical" ? `${key} (${src.kind})` : key;
+                    return (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            </div>
+
+            {activePastDate && scorecardErrors[activePastDate] ? (
+              <div className="note">
+                Couldn't load the scorecard: {scorecardErrors[activePastDate]}
+              </div>
+            ) : !activeScorecard || !activeSource ? (
+              <div className="center-msg">Loading scorecard…</div>
+            ) : (
+              <div className="shows-row">
+                {/* CARD A: MODEL SCORECARD */}
+                <div className="card shows-card">
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+                    <span className="card-title">{activePastModel}</span>
+                    <span className="label-caps">{activeSource.kind}</span>
+                  </div>
+                  <div className="card-sub" style={{ marginTop: 4 }}>
+                    Frozen shortlist scored against what actually played.
+                  </div>
+
+                  <div className="metrics-strip">
+                    <div className="metric">
+                      <span className="metric-label">Hit rate · top 10</span>
+                      <span className="metric-value">
+                        {pct1(activeSource.metrics.hit_rate_top10)}
+                      </span>
+                      <span className="metric-sub">
+                        {activeSource.metrics.hits_top10}/
+                        {Math.min(10, activeSource.n_rows)} hit
+                      </span>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">Recall</span>
+                      <span className="metric-value">{pct1(activeSource.metrics.recall)}</span>
+                      <span className="metric-sub">of {activeScorecard.n_played} played</span>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">Brier</span>
+                      <span className="metric-value">{activeSource.metrics.brier.toFixed(3)}</span>
+                      <span className="metric-sub">lower = better</span>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">Shortlist</span>
+                      <span className="metric-value">{activeSource.n_rows}</span>
+                      <span className="metric-sub">songs</span>
+                    </div>
+                  </div>
+
+                  {(activeSource.best_call || activeSource.biggest_whiff) && (
+                    <div className="callouts">
+                      {activeSource.best_call && (
+                        <div className="callout hit">
+                          <span className="callout-kicker">Gutsiest hit</span>
+                          <span className="callout-body">
+                            {activeSource.best_call.song}
+                            <span className="callout-prob">
+                              {" "}
+                              · {pct1(activeSource.best_call.prob)}
+                            </span>
+                          </span>
+                        </div>
+                      )}
+                      {activeSource.biggest_whiff && (
+                        <div className="callout miss">
+                          <span className="callout-kicker">Biggest whiff</span>
+                          <span className="callout-body">
+                            {activeSource.biggest_whiff.song}
+                            <span className="callout-prob">
+                              {" "}
+                              · {pct1(activeSource.biggest_whiff.prob)}
+                            </span>
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="set-section" style={{ marginTop: 16 }}>
+                    <div className="set-label">Shortlist · frozen P(played) · hit / miss</div>
+                    {activeSource.rows.map((r) => (
+                      <div className={"score-row" + (r.hit ? " hit" : " miss")} key={r.slug}>
+                        <span className="score-mark">{r.hit ? "✓" : "×"}</span>
+                        <span className="score-name">{r.song}</span>
+                        <span className="score-prob">{pct1(r.prob)}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {activeSource.rationale && (
+                    <div className="note">{activeSource.rationale}</div>
+                  )}
+                </div>
+
+                {/* CARD B: WHAT PLAYED (context; full setlist lives on phish.net) */}
+                <div className="card shows-card">
+                  <span className="card-title">What played</span>
+                  <div
+                    className="mono"
+                    style={{ color: "var(--text-muted)", fontSize: 11, margin: "4px 0 16px" }}
+                  >
+                    {dateLabel(activeScorecard.showdate)} · {activeScorecard.venue_name} ·{" "}
+                    {activeScorecard.city}, {activeScorecard.state}
+                  </div>
+
+                  {activeScorecard.missed_by_all.length > 0 && (
+                    <div className="set-section">
+                      <div className="set-label">Played · predicted by nobody</div>
+                      <div className="played-list">
+                        {activeScorecard.missed_by_all.map((s) => (
+                          <span className="played-chip miss" key={s.slug}>
+                            {s.song}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="set-section">
+                    <div className="set-label">Actual setlist · {activeScorecard.n_played} songs</div>
+                    <div className="played-list">
+                      {activeScorecard.played.map((s) => (
+                        <span className="played-chip" key={s.slug}>
+                          {s.song}
+                        </span>
+                      ))}
+                    </div>
+                    <a
+                      className="btn-link"
+                      href={activeScorecard.phishnet_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ display: "inline-block", marginTop: 14 }}
+                    >
+                      full setlist on phish.net →
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        ))}
     </>
   );
 }

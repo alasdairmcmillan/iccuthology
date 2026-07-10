@@ -143,6 +143,85 @@ export interface Seedfile {
   dates: string[];
 }
 
+// GET /api/scoreboard -> scorecards/scoreboard.json  (DEPLOY-CONTRACTS.md §8)
+// Epoch-INDEPENDENT: past-prediction accuracy, not scoped to the current epoch.
+export interface ScoreboardShow {
+  showdate: string;
+  venue_name: string;
+  city: string;
+  state: string;
+  n_played: number;
+  source_keys: string[];
+}
+export interface ScoreboardModel {
+  kind: "statistical" | "llm" | "mcp";
+  n_shows: number;
+  hit_rate_top10: number;
+  recall: number;
+  brier: number;
+  log_loss: number;
+}
+export interface Scoreboard {
+  updated_at: string;
+  /** every scored show, showdate DESC */
+  shows: ScoreboardShow[];
+  /** unweighted means over scored shows, keyed by source */
+  models: Record<string, ScoreboardModel>;
+}
+
+// GET /api/scorecard/{showdate} -> scorecards/{showdate}.json  (DEPLOY-CONTRACTS.md §8)
+export interface ScoredSong {
+  slug: string;
+  song: string;
+}
+export interface ScorecardMetrics {
+  hits_top10: number;
+  hit_rate_top10: number;
+  recall: number;
+  brier: number;
+  log_loss: number;
+}
+/** best_call = gutsiest hit (lowest-prob hit); biggest_whiff = highest-prob miss. */
+export interface ScorecardCall {
+  song: string;
+  slug: string;
+  prob: number;
+}
+export interface ScorecardRow {
+  song: string;
+  slug: string;
+  prob: number;
+  hit: boolean;
+}
+export interface ScorecardSource {
+  model: string;
+  kind: "statistical" | "llm" | "mcp";
+  n_rows: number;
+  metrics: ScorecardMetrics;
+  best_call: ScorecardCall | null;
+  biggest_whiff: ScorecardCall | null;
+  /** frozen rows, prob desc */
+  rows: ScorecardRow[];
+  // mcp:* sources keep their frozen submission fields verbatim.
+  rationale?: string;
+  submitted_at?: string;
+}
+export interface Scorecard {
+  showdate: string;
+  venue_name: string;
+  city: string;
+  state: string;
+  frozen_epoch: string;
+  scored_at: string;
+  phishnet_url: string;
+  n_played: number;
+  /** distinct performed slugs, setlist order */
+  played: ScoredSong[];
+  sources: Record<string, ScorecardSource>;
+  /** played songs in NO source's shortlist */
+  missed_by_all: ScoredSong[];
+}
+
 // POST /api/run -> run reduction
 export interface RunRow {
   song: string;

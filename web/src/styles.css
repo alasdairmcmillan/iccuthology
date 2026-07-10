@@ -680,6 +680,14 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* A long <option> (e.g. "Jul 8, 2026 · Xfinity Center") must shrink the
+     select, not push the row past the viewport on mobile. */
+  max-width: 100%;
+  min-width: 0;
+}
+.control .select {
+  min-width: 0;
+  max-width: 100%;
 }
 .control-label {
   color: var(--text-label);
@@ -749,6 +757,192 @@ a:hover {
   font-family: var(--font-mono);
   padding: 24px 0;
   text-align: center;
+}
+
+/* --- Mode toggle (Shows: Upcoming vs Past scorecards) -------------------- */
+.mode-toggle {
+  display: inline-flex;
+  gap: 4px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  margin-bottom: 24px;
+  max-width: 100%;
+}
+.mode-option {
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: var(--text-label);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 7px 16px;
+  border-radius: var(--radius-sm);
+}
+.mode-option.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.mode-option:focus-visible {
+  outline: none;
+  color: var(--text-primary);
+}
+
+/* --- Past scorecards ----------------------------------------------------- */
+/* Compact metrics strip — mono/label-caps like the tour stat columns. */
+.metrics-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 4px;
+}
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-md);
+}
+.metric-label {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.metric-value {
+  color: var(--accent);
+  font-size: 17px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+.metric-sub {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+.callouts {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.callout {
+  flex: 1 1 180px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-card);
+}
+.callout.hit {
+  border-color: var(--accent-a55);
+  background: var(--accent-a18);
+}
+.callout.miss {
+  background: var(--input-bg);
+}
+.callout-kicker {
+  display: block;
+  font-size: 9px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+.callout.hit .callout-kicker {
+  color: var(--accent);
+}
+.callout.miss .callout-kicker {
+  color: var(--text-muted);
+}
+.callout-body {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+.callout-prob {
+  color: var(--text-label);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* Hit/miss shortlist rows — hits get the accent + check, misses are dimmed
+   and struck through. */
+.score-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-row);
+}
+.score-mark {
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+  font-weight: 700;
+}
+.score-row.hit .score-mark {
+  color: var(--accent);
+}
+.score-row.miss .score-mark {
+  color: var(--text-tertiary);
+}
+.score-name {
+  flex: 1;
+}
+.score-row.hit .score-name {
+  color: var(--text-primary);
+}
+.score-row.miss .score-name {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.score-prob {
+  width: 48px;
+  text-align: right;
+  font-weight: 700;
+}
+.score-row.hit .score-prob {
+  color: var(--accent);
+}
+.score-row.miss .score-prob {
+  color: var(--text-tertiary);
+}
+
+/* Actual-played / missed-by-all chips — compact, mono, wrap. */
+.played-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.played-chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--input-bg);
+  border: 1px solid var(--border-card);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+.played-chip.miss {
+  color: var(--accent);
+  border-color: var(--accent-a55);
+  background: var(--accent-a18);
+}
+
+/* Metrics strip drops to 2 columns on narrow viewports. */
+@media (max-width: 640px) {
+  .metrics-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* --- About -------------------------------------------------------------- */
