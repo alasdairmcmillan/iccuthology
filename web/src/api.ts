@@ -8,13 +8,17 @@
 // On any network/parse error we fall back to fixtures so the app still renders
 // (offline dev, API downtime). Fixture-backed responses match the JSON shapes.
 import type {
+  Catalog,
   Meta,
   RunReport,
+  SamplesMeta,
   Schedule,
+  Seedfile,
   SetlistPrediction,
   ShowReport,
   TourReport,
 } from "./types";
+import { decodeSamples, type DecodedSamples } from "./lib/samples";
 import {
   genMeta,
   genSchedule,
@@ -80,6 +84,73 @@ export function fetchShow(showdate: string): Promise<ShowReport> {
 
 export function fetchSetlist(showdate: string): Promise<SetlistPrediction | null> {
   return getJson(`/api/setlist/${showdate}`, () => genSetlists[showdate] ?? null);
+}
+
+// ---------------------------------------------------------------------------
+// Personal "due to see" data (DEPLOY-CONTRACTS §2a). No fixture fallback —
+// catalog.json (~300 KB) and samples.bin (~1.3 MB) are far too heavy to
+// bundle, so the Personal screen requires the live API and shows a note in
+// the offline preview. Both are epoch-pinned and immutable, so cache the
+// in-flight promise module-wide (same pattern as the Worker's samples cache);
+// failures evict so the next visit retries.
+// ---------------------------------------------------------------------------
+
+async function liveJson<T>(path: string): Promise<T> {
+  if (USE_FIXTURES) throw new Error(`${path} is not available in the offline preview`);
+  const res = await fetch(API_BASE + path);
+  if (!res.ok) {
+    let message = `${path} -> ${res.status}`;
+    try {
+      const body = (await res.json()) as { message?: string };
+      if (body.message) message = body.message;
+    } catch {
+      /* keep the status message */
+    }
+    throw new Error(message);
+  }
+  return (await res.json()) as T;
+}
+
+let catalogCache: Promise<Catalog> | null = null;
+export function fetchCatalog(): Promise<Catalog> {
+  if (!catalogCache) {
+    const p = liveJson<Catalog>("/api/catalog");
+    catalogCache = p;
+    p.catch(() => {
+      if (catalogCache === p) catalogCache = null;
+    });
+  }
+  return catalogCache;
+}
+
+export interface SamplesBundle {
+  meta: SamplesMeta;
+  decoded: DecodedSamples;
+}
+
+let samplesCache: Promise<SamplesBundle> | null = null;
+export function fetchSamples(): Promise<SamplesBundle> {
+  if (!samplesCache) {
+    const p = (async (): Promise<SamplesBundle> => {
+      if (USE_FIXTURES) throw new Error("samples.bin is not available in the offline preview");
+      const [meta, binRes] = await Promise.all([
+        liveJson<SamplesMeta>("/api/samples-meta"),
+        fetch(API_BASE + "/api/samples"),
+      ]);
+      if (!binRes.ok) throw new Error(`/api/samples -> ${binRes.status}`);
+      return { meta, decoded: decodeSamples(await binRes.arrayBuffer()) };
+    })();
+    samplesCache = p;
+    p.catch(() => {
+      if (samplesCache === p) samplesCache = null;
+    });
+  }
+  return samplesCache;
+}
+
+/** GET /api/seedfile/{user} — Worker-proxied phish.net seedfile (no CORS upstream). */
+export function fetchSeedfile(user: string): Promise<Seedfile> {
+  return liveJson<Seedfile>(`/api/seedfile/${encodeURIComponent(user)}`);
 }
 
 /**

@@ -16,6 +16,7 @@
  */
 
 import { chaserReduction, decodeSamples, runReduction, type VocabEntry } from "./samples";
+import { parseSeedfile, SEEDFILE_USER_RE, seedfileUrl } from "./seedfile";
 import { getBytes, getJson, resolveEpoch, snapshotKey, type Env } from "./r2";
 
 export type { Env };
@@ -300,6 +301,42 @@ async function apiChaser(env: Env, slug: string): Promise<Response> {
   );
 }
 
+/**
+ * GET /api/seedfile/{user} — proxy + parse a phish.net seedfile (attended
+ * showdates). phish.net sends no CORS headers, so the browser can't fetch
+ * seedfiles itself; the Personal screen calls this instead. Response:
+ * `{"user": ..., "dates": ["yyyy-mm-dd", ...]}` (sorted, deduped).
+ */
+async function apiSeedfile(user: string): Promise<Response> {
+  if (!SEEDFILE_USER_RE.test(user)) {
+    return jsonResponse(
+      { error: "bad_request", message: "invalid phish.net username" },
+      { status: 400, cache: false },
+    );
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(seedfileUrl(user), {
+      headers: { "user-agent": "phishpred-worker/0.1" },
+    });
+  } catch (err) {
+    return jsonResponse(
+      { error: "upstream_error", message: `phish.net fetch failed: ${(err as Error).message}` },
+      { status: 502, cache: false },
+    );
+  }
+  if (!upstream.ok) {
+    return notFound(`no seedfile for user ${JSON.stringify(user)} (phish.net ${upstream.status})`);
+  }
+
+  const dates = parseSeedfile(await upstream.text());
+  if (dates.length === 0) {
+    return notFound(`no attended showdates found in seedfile for ${JSON.stringify(user)}`);
+  }
+  return jsonResponse({ user, dates });
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -313,6 +350,7 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   if (method === "GET" && pathname === "/api/tour") return apiSnapshotJson(env, "tour.json");
   if (method === "GET" && pathname === "/api/samples") return apiSamplesBin(env);
   if (method === "GET" && pathname === "/api/samples-meta") return apiSnapshotJson(env, "samples_meta.json");
+  if (method === "GET" && pathname === "/api/catalog") return apiSnapshotJson(env, "catalog.json");
   if (method === "POST" && pathname === "/api/run") return apiRun(request, env);
 
   let m: RegExpMatchArray | null;
@@ -327,6 +365,9 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   }
   if (method === "GET" && (m = pathname.match(/^\/api\/chaser\/([^/]+)$/))) {
     return apiChaser(env, decodeURIComponent(m[1]));
+  }
+  if (method === "GET" && (m = pathname.match(/^\/api\/seedfile\/([^/]+)$/))) {
+    return apiSeedfile(decodeURIComponent(m[1]));
   }
 
   return jsonResponse(

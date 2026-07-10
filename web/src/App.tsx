@@ -17,10 +17,11 @@ import type {
 import Header, { type SearchResult } from "./components/Header";
 import ToursScreen from "./components/ToursScreen";
 import ShowsScreen from "./components/ShowsScreen";
+import PersonalScreen from "./components/PersonalScreen";
 import AboutScreen from "./components/AboutScreen";
 import { dateLabelDay, pct } from "./lib/format";
 
-export type Screen = "tours" | "shows" | "about";
+export type Screen = "tours" | "shows" | "personal" | "about";
 
 function todayIso(): string {
   const d = new Date();
@@ -158,6 +159,7 @@ export default function App() {
             onChangeSelected={setSelectedShows}
           />
         )}
+        {loaded && screen === "personal" && <PersonalScreen schedule={schedule} />}
         {loaded && screen === "about" && <AboutScreen />}
         {loaded && offline && (
           <div className="fixtures-banner" style={{ marginTop: 32 }}>
