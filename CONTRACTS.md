@@ -322,6 +322,42 @@ SETLIST_SCHEMA   # {"sets": {<label>: [{"slug","segue_mark"}, ...]}}
 - `evaluate_sampler` uses leakage-free contemporaneous features from `features.build_features` (sliced per show) and each show's **real** set skeleton — an upper bound on assembly quality given correct structure; the very first show (no prior plays) is correctly unscoreable. NOTE: `sample_setlist(showdate)` on a *genuine future* show is leakage-free via `features_for_future_show`; on an already-indexed *past* date it inherits `features_for_future_show`'s "as-of-latest" behavior (documented follow-up), which is why `evaluate_sampler` bypasses it.
 - CLI: `phishpred setlist <date> [--llm --provider P --model M]`; `--llm` builds `llm.get_client(provider, model)` and calls `assemble_setlist_llm`.
 
+## score.py — accuracy scorecards (deploy §8)
+
+Post-show scoring of FROZEN pre-show predictions. See DEPLOY-CONTRACTS.md §8 for
+the authoritative scorecard/scoreboard JSON shapes. Pure core + DB-backed driver.
+
+```python
+def score_show(frozen_payload: dict, played: list[dict]) -> dict
+    """Score one frozen `show/{showdate}.json` doc against the played setlist.
+    `played` = distinct performed songs in setlist order [{"slug","song"}, ...].
+    Per source: hits_top10 over the first min(10, n_rows) rows (frozen prob-desc
+    order preserved), hit_rate_top10, recall = |played ∩ shortlist| / n_played,
+    brier = mean (prob - hit)^2, log_loss (probs clamped to [0.001, 0.999]),
+    best_call (hit, lowest prob; null if none) / biggest_whiff (miss, highest
+    prob; null if none). mcp sources keep frozen rationale/submitted_at verbatim.
+    Emits `missed_by_all` (played songs in NO source's shortlist)."""
+
+def build_scoreboard(scorecards: list[dict]) -> dict
+    """Rolling index + per-model unweighted metric means. `shows` showdate DESC;
+    empty shows/models is valid."""
+
+def score_all(conn, frozen_dir, out_dir, rescore_days=7, today=None) -> list[str]
+    """Scan `{frozen_dir}/{showdate}.json`; for each show indexed in the DB
+    (show_index IS NOT NULL) and showdate < UTC today, write
+    `{out_dir}/{showdate}.json`. Skip when a scorecard exists UNLESS showdate >=
+    today - rescore_days (idempotent rewrite inside the window). ALWAYS rebuild
+    `{out_dir}/scoreboard.json` from every scorecard present (creates out_dir).
+    `today` injectable for tests. Malformed frozen files skipped (stderr warning,
+    never crash). Returns the showdates (re)written."""
+```
+- Played set from DB: distinct performed slugs in setlist order of first
+  occurrence (performances ⋈ songs, `ORDER BY set_label, position` — same idiom
+  as `mcp.tools.recent_setlists`).
+- Freeze rule (§8): a scorecard is only ever computed from a frozen file, never a
+  current-epoch artifact; `frozen_epoch` records provenance.
+- CLI: `phishpred score --frozen DIR --out DIR [--rescore-days 7]`.
+
 ## Testing conventions
 
 - pytest under `tests/`. No network in tests: API tests use JSON fixtures under

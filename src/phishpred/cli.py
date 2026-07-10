@@ -336,6 +336,25 @@ def publish(
 
 
 @app.command()
+def score(
+    frozen: str = typer.Option(..., "--frozen", help="Frozen show-doc dir (frozen/show — one {showdate}.json per show)"),
+    out: str = typer.Option(..., "--out", help="Scorecards output dir (writes {showdate}.json + scoreboard.json)"),
+    rescore_days: int = typer.Option(7, "--rescore-days", help="Rewrite scorecards for shows within this many days of UTC today"),
+) -> None:
+    """Score frozen past predictions against actual setlists (deploy plan §8).
+
+    Scans each frozen show doc whose show is played + indexed in the DB, writes a
+    per-show scorecard (skipping already-scored shows outside the rescore window),
+    then always rebuilds scoreboard.json.
+    """
+    from .db import get_connection
+    from .score import score_all
+
+    written = score_all(get_connection(), frozen, out, rescore_days=rescore_days)
+    typer.echo(f"scored {len(written)} show(s) -> {out}; scoreboard.json rebuilt")
+
+
+@app.command()
 def personal(
     user: str = typer.Option(None, help="phish.net username — fetches your public seedfile"),
     seedfile: str = typer.Option(None, help="Full seedfile URL (overrides --user)"),

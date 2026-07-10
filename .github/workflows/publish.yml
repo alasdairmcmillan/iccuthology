@@ -19,7 +19,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
 
       - name: Restore data from R2
-        run: uv run python scripts/r2_pull.py state/phish.db data/phish.db submitted/ data/predictions/submitted/ latest.json data/predictions/latest.json
+        run: uv run python scripts/r2_pull.py state/phish.db data/phish.db submitted/ data/predictions/submitted/ latest.json data/predictions/latest.json frozen/ data/frozen/ scorecards/ data/scorecards/
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -42,6 +42,28 @@ jobs:
           --with-samples --with-catalog --submitted data/predictions/submitted
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Score frozen past predictions
+        if: steps.gate.outputs.changed == 'true'
+        run: uv run phishpred score --frozen data/frozen/show --out data/scorecards
+
+      - name: Sync scorecards to R2
+        if: steps.gate.outputs.changed == 'true'
+        run: uv run python scripts/r2_push.py data/scorecards scorecards
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+
+      - name: Freeze show docs to R2
+        if: steps.gate.outputs.changed == 'true'
+        run: uv run python scripts/r2_push.py build/snapshots/show frozen/show
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
 
       - name: Sync snapshot to R2
         if: steps.gate.outputs.changed == 'true'
