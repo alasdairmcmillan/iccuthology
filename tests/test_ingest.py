@@ -235,6 +235,34 @@ def test_refresh_repulls_current_year_and_years_since_last_refresh(tmp_path, con
     assert new_last_refresh != "2000-01-01T00:00:00+00:00"
 
 
+def test_refresh_on_fresh_db_falls_back_to_full_ingest(tmp_path, conn):
+    handler, calls = make_handler()
+    client = make_client(tmp_path, handler)
+
+    # Brand-new DB: no meta.last_refresh, zero indexed shows. `refresh` must
+    # detect this and run a full 1983..current-year backfill instead of the
+    # incremental current-year-only path (the empty-R2-bucket first-run case).
+    stats = refresh(conn, client)
+    assert isinstance(stats, IngestStats)
+
+    # The full sweep reached all the way back to 1983...
+    assert "/v5/shows/showyear/1983.json" in calls
+    # ...and picked up the 2025 fixture data, not just the current year.
+    show_ids = {r["showid"] for r in conn.execute("SELECT showid FROM shows").fetchall()}
+    assert {1001, 1002, 1003, 1005} <= show_ids
+    rows = {r["showid"]: r for r in conn.execute("SELECT * FROM shows").fetchall()}
+    assert rows[1001]["show_index"] == 0
+    assert rows[1002]["show_index"] == 1
+
+    last_refresh = conn.execute("SELECT value FROM meta WHERE key='last_refresh'").fetchone()
+    assert last_refresh is not None and last_refresh["value"]
+
+    # A second refresh takes the incremental path: no re-sweep back to 1983.
+    sweep_calls_before = calls.count("/v5/shows/showyear/1983.json")
+    refresh(conn, client)
+    assert calls.count("/v5/shows/showyear/1983.json") == sweep_calls_before
+
+
 def test_refresh_persists_forced_exclusion_across_untouched_years(tmp_path, conn):
     handler, _calls = make_handler()
     client = make_client(tmp_path, handler)

@@ -58,8 +58,18 @@ The workflow (`.github/workflows/publish.yml`) restores `state/phish.db`,
 start of every run via `scripts/r2_pull.py`. On a brand-new, empty bucket
 those keys don't exist yet — `r2_pull.py` treats that as non-fatal (a warning
 to stderr, not a failure), so `phishpred refresh` runs against a fresh local
-`data/phish.db` and the first gate reports `changed=true`. Nothing extra
-needs to be done for the first run.
+`data/phish.db`.
+
+`refresh` detects the fresh/empty database (no `meta.last_refresh`, or zero
+indexed shows) and falls back to a **full ingest** of 1983..current-year
+instead of its usual incremental pull — otherwise the first run would ingest
+only the current year and publish badly-calibrated predictions against ~14
+shows of history instead of ~1945. Expect the first run to take several
+extra minutes (the full backfill is throttled to stay polite to the
+phish.net API); every subsequent run finds a populated `state/phish.db` in
+R2 and takes the fast incremental path. The first gate reports
+`changed=true`, so the first run also publishes. Nothing extra needs to be
+done for the first run.
 
 ## 5. Triggering `workflow_dispatch`
 
