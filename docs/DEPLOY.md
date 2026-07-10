@@ -44,7 +44,7 @@ secret**. Add:
 | `R2_SECRET_ACCESS_KEY`   | from the R2 API token (step 2)                       |
 | `R2_BUCKET`              | bucket name (step 1)                                 |
 | `PHISHNET_API_KEY`       | phish.net API key (https://phish.net/api/keys)       |
-| `ANTHROPIC_API_KEY`      | optional — only needed for the `llm:*` prediction column |
+| `ANTHROPIC_API_KEY`      | optional — reserved for the future built-in `llm:*` prediction column, which is **not yet wired into publish** (see §8); harmless to set now |
 
 All four `R2_*` secrets are required by `scripts/r2_common.py`; a missing
 one raises a clear `RuntimeError` naming which var is absent (fails fast in
@@ -104,3 +104,78 @@ To force a republish even when nothing changed (e.g. testing), trigger
 file's single `MODEL_PARAMS` line, or after a code change — either changes
 `epoch`'s `code_version` / `model`/`seed` inputs, which is by design (see
 `DEPLOY-CONTRACTS.md` §1 for the exact epoch hash inputs).
+
+## 7. Serve tier — deploy the Worker (site + API)
+
+One Cloudflare Worker serves both the built React app (assets binding at
+`web/dist`) and the read-only `/api/*` JSON API (R2 binding). Config lives in
+`worker/wrangler.toml` — `account_id`, the `custom_domain` routes, and the
+`SNAPSHOTS` bucket binding must be filled in (they are, as of this commit).
+Two ways to deploy; pick one:
+
+**A. Locally with wrangler** (fastest one-off):
+
+```
+cd web && npm run build          # wrangler serves ../web/dist as static assets
+cd ../worker
+npx wrangler login               # once; opens a browser OAuth flow
+npx wrangler deploy
+```
+
+**B. Cloudflare git integration (Workers Builds)** — push-to-deploy, the
+standing setup. Cloudflare dashboard → Workers → Create → import the GitHub
+repo, then set (Advanced settings — the defaults will NOT work for this
+monorepo):
+
+| Setting          | Value                                             |
+|------------------|----------------------------------------------------|
+| Project name     | `phish-predictor-worker` (must match wrangler.toml `name`) |
+| Root directory   | `/worker`                                          |
+| Build command    | `npm ci --prefix ../web && npm run build --prefix ../web` |
+| Deploy command   | `npx wrangler deploy`                              |
+
+Either way, the first deploy attaches the `custom_domain` routes from
+wrangler.toml, creating DNS records + certs on the zone automatically. If the
+apex already has a DNS record (e.g. from domain parking), Cloudflare prompts
+about the conflict — let it replace the record.
+
+**Empty-bucket behavior:** until the first publish (§4-§5) lands a snapshot in
+R2, every `/api/*` route 404s (no published epoch) and the site renders from
+its bundled fixtures. The tell that live data has arrived: the Tours table's
+dist header reads `0/1/2/3/4+` (fixtures predate the 4+ split) and
+`/api/latest` returns the epoch JSON.
+
+## 8. Agent / LLM predictions (`mcp:<label>` source columns)
+
+The working path for LLM-generated predictions is the **MCP submission
+inbox** — an agent (Claude Desktop/Code, or any MCP client) researches with
+the read tools and submits per-song probabilities; publish folds them into the
+show pages as extra source columns. Full tool reference: `docs/MCP.md`.
+
+1. **Generate** — run the local MCP server (`python -m uv run phishpred-mcp`
+   from the repo root; Claude Desktop config in `docs/MCP.md`) and have the
+   agent call `submit_prediction(showdate, model_label, predictions,
+   rationale)`. This writes
+   `data/predictions/submitted/{model_label}/{showdate}.json` — validated,
+   never touching core tables.
+2. **Push** — upload the inbox to the R2 `submitted/` prefix (the four `R2_*`
+   env vars from §2-§3):
+   ```
+   python -m uv run python scripts/r2_push.py data/predictions/submitted submitted
+   ```
+3. **Publish** — nothing else to do: the scheduled workflow pulls `submitted/`
+   at the start of every run, and a new submission changes the epoch's
+   submissions hash, so the gate reports `changed=true` and the next run
+   republishes with a `sources["mcp:{label}"]` column on the matching show
+   page. To see it sooner than the next cron tick, trigger
+   `workflow_dispatch` (§5).
+
+Two related-but-different LLM paths, for clarity:
+
+- **Built-in `llm:*` per-song column** (`models/llm.py` `LLMSongModel`): only
+  wired to the offline `phishpred llm-backtest` command today.
+  `publish --compare-models` accepts `lr`/`gbm` only — passing `llm:*` is not
+  yet supported, which is why `ANTHROPIC_API_KEY` in the workflow is currently
+  unused (§3).
+- **LLM setlist assembler** (`phishpred setlist <date> --llm`): CLI-only
+  display; published setlist docs always come from the deterministic sampler.
