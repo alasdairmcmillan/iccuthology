@@ -3,6 +3,8 @@ import type { Meta, Schedule, TourReport } from "../types";
 import { fetchTour, fetchTourById } from "../api";
 import { ACCENT, bucketColor } from "../theme";
 import { monthLabel, pct1 } from "../lib/format";
+import { songPageSize } from "../lib/paging";
+import Pager from "./Pager";
 
 interface ToursScreenProps {
   meta: Meta;
@@ -55,6 +57,8 @@ export default function ToursScreen({
     meta.tours.find((t) => t.has_data)?.id ?? "all",
   );
   const [page, setPage] = useState(0);
+  const [songPage, setSongPage] = useState(0);
+  const [songPageRows] = useState(songPageSize);
 
   // Per-tour table: each tour/{id}.json is a reduction of the same published
   // simulation over just that tour's nights (the "all" pill uses tour.json).
@@ -145,6 +149,7 @@ export default function ToursScreen({
             onClick={() => {
               setTourId(o.id);
               setPage(0);
+              setSongPage(0);
             }}
           >
             <div className="pill-label">{o.label}</div>
@@ -177,7 +182,9 @@ export default function ToursScreen({
                     : "0/1/2/3/4+"}
                 </span>
               </div>
-              {tourData.rows.map((r) => {
+              {tourData.rows
+                .slice(songPage * songPageRows, (songPage + 1) * songPageRows)
+                .map((r) => {
                 const bc = bucketColor(r.bucket, ACCENT);
                 const dist =
                   distBuckets(r.dist)
@@ -203,8 +210,14 @@ export default function ToursScreen({
                     <span className="r-dist">{dist}</span>
                   </div>
                 );
-              })}
+                })}
             </div>
+            <Pager
+              page={songPage}
+              totalRows={tourData.rows.length}
+              pageSize={songPageRows}
+              onPage={setSongPage}
+            />
             <div className="cli-caption">
               Estimated from {tourData.n_sims.toLocaleString()} Monte-Carlo simulations of{" "}
               {tourId === "all" ? "all future shows" : selected.label} · {tourData.model} model

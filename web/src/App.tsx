@@ -39,7 +39,7 @@ function defaultNight(schedule: Schedule): string | null {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("shows");
+  const [screen, setScreen] = useState<Screen>("tours");
   const [meta, setMeta] = useState<Meta | null>(null);
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [tour, setTour] = useState<TourReport | null>(null);

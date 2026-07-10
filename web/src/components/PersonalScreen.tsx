@@ -3,11 +3,13 @@ import { fetchCatalog, fetchSamples, fetchSeedfile, USE_FIXTURES } from "../api"
 import { personalReduction } from "../lib/samples";
 import type { Schedule } from "../types";
 import { dateLabelDay } from "../lib/format";
+import { songPageSize } from "../lib/paging";
+import Pager from "./Pager";
 
 // Mirrors the `phishpred personal` CLI defaults: drop obscure songs, rank the
 // remainder by career play count (the "surprise" axis, per catalog.json order).
 const MIN_PLAYS = 20;
-const TOP = 30;
+const TOP = 100;
 
 interface PersonalRow {
   songid: number;
@@ -58,6 +60,8 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<PersonalReport | null>(null);
+  const [page, setPage] = useState(0);
+  const [pageRows] = useState(songPageSize);
 
   const venueByDate = useMemo(() => {
     const map: Record<string, string> = {};
@@ -117,6 +121,7 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
         if (rows.length >= TOP) break;
       }
 
+      setPage(0);
       setReport({
         nDatesGiven: dates.length,
         nMatched: matched.length,
@@ -201,7 +206,7 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
             <span style={{ textAlign: "right" }}>P(finally see it)</span>
             <span style={{ textAlign: "right" }}>Most likely show</span>
           </div>
-          {report.rows.map((r) => (
+          {report.rows.slice(page * pageRows, (page + 1) * pageRows).map((r) => (
             <div className="personal-grid personal-grid-row" key={r.songid}>
               <span className="r-song">{r.song}</span>
               <span className="mono personal-dim">{r.plays}</span>
@@ -217,6 +222,12 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
               </span>
             </div>
           ))}
+          <Pager
+            page={page}
+            totalRows={report.rows.length}
+            pageSize={pageRows}
+            onPage={setPage}
+          />
           {report.rows.length === 0 && (
             <div className="center-msg">
               Nothing left to chase — you've seen every commonly played song. Go see a

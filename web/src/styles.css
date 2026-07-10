@@ -892,12 +892,16 @@ a:hover {
   /* Numeric tables keep their column layout and scroll sideways inside
      their card instead of stretching the page. */
   .tour-table-card,
-  .shows-card {
+  .shows-card,
+  .personal-layout .card {
     overflow-x: auto;
   }
   .run-grid-head,
   .run-grid-row {
     min-width: 460px;
+  }
+  .personal-grid {
+    min-width: 560px;
   }
 }
 
