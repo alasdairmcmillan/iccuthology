@@ -44,7 +44,10 @@ export interface TourRow {
   slug: string;
   expected_plays: number;
   p_at_least_one: number;
-  dist: { "0": number; "1": number; "2": number; "3+": number };
+  // Play-count buckets -> P(exactly n). Current epochs publish
+  // {"0","1","2","3","4+"}; epochs published before the 4+ split have
+  // {"0","1","2","3+"}, so consumers must key off what's present.
+  dist: Record<string, number>;
   bucket: Bucket;
   gap_ratio?: number;
   analytic_p: number;

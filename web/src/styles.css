@@ -192,6 +192,25 @@ a:hover {
 .night-chip .pct {
   color: var(--accent);
 }
+.tour-chip {
+  cursor: pointer;
+  background: var(--accent-a66, rgba(255, 255, 255, 0.08));
+  background: color-mix(in srgb, var(--accent) 14%, var(--input-bg));
+  border: 1px solid var(--accent-a66);
+  color: var(--accent);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 3px 7px;
+  border-radius: 4px;
+}
+.tour-chip:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.tour-chip-label {
+  color: var(--text-label);
+  margin-left: 2px;
+}
 .search-empty {
   color: var(--text-muted);
   font-size: 12px;
@@ -286,6 +305,7 @@ a:hover {
 .tour-scroll {
   max-height: 640px;
   overflow-y: auto;
+  overflow-x: auto;
   scrollbar-gutter: stable;
   padding-right: 6px;
 }
@@ -296,10 +316,25 @@ a:hover {
   flex-direction: column;
   gap: 16px;
 }
+/* .tours-row wraps once its content is narrower than 560px (table basis)
+   + 24px gap + 340px (side) = 924px — ~1004px viewport given .page's 40px
+   side padding. Once the schedule stacks below the table it should span
+   the full row instead of staying at its side-by-side width. */
+@media (max-width: 1006px) {
+  .tour-side {
+    width: 100%;
+  }
+}
 .tour-grid-head,
 .tour-grid-row {
   display: grid;
-  grid-template-columns: 1fr 80px 80px 110px 140px 70px;
+  /* Every track has a hard floor so mid-width viewports scroll sideways
+     (via .tour-scroll) instead of crushing columns. Above the floors the
+     stat columns flex too, spreading spare width across the whole row
+     rather than dumping it all into Song — Dist ends up flush right. */
+  grid-template-columns:
+    minmax(150px, 2.2fr) minmax(100px, 1fr) minmax(64px, 0.8fr)
+    minmax(96px, 0.9fr) minmax(104px, 1fr);
   gap: 8px;
   align-items: center;
 }
@@ -328,25 +363,24 @@ a:hover {
   color: var(--text-secondary);
   font-size: 12px;
   font-family: var(--font-mono);
-  text-align: right;
+  text-align: center;
 }
 .r-p {
   color: var(--accent);
   font-size: 12px;
   font-family: var(--font-mono);
-  text-align: right;
+  text-align: center;
   font-weight: 700;
 }
 .r-dist {
   color: var(--text-label);
   font-size: 11px;
   font-family: var(--font-mono);
+  text-align: center;
 }
-.r-analytic {
-  color: var(--text-muted);
-  font-size: 12px;
-  font-family: var(--font-mono);
-  text-align: right;
+/* Tour table centres everything except Song (badges are start-aligned elsewhere). */
+.tour-grid-row .badge {
+  justify-self: center;
 }
 .no-data-card {
   background: var(--bg-card);
@@ -777,15 +811,38 @@ a:hover {
   .shows-card {
     overflow-x: auto;
   }
-  .tour-grid-head,
-  .tour-grid-row {
-    min-width: 620px;
-  }
   .run-grid-head,
   .run-grid-row {
     min-width: 460px;
   }
-  .tour-side {
-    width: 100%;
+}
+
+/* Mobile tour table: no sideways scroll — drop P(≥1) and Dist, keep
+   Song | Plays | bucket chip, and let Song flex/wrap to fit. */
+@media (max-width: 640px) {
+  .tour-grid-head span:nth-child(3),
+  .tour-grid-head span:nth-child(5),
+  .tour-grid-row .r-p,
+  .tour-grid-row .r-dist {
+    display: none;
+  }
+  .tour-grid-head,
+  .tour-grid-row {
+    grid-template-columns: minmax(0, 1fr) 60px 92px;
+  }
+  .tour-grid-row .badge {
+    font-size: 9px;
+    padding: 3px 6px;
+  }
+  .when-wide {
+    display: none;
+  }
+}
+.when-narrow {
+  display: none;
+}
+@media (max-width: 640px) {
+  .when-narrow {
+    display: inline;
   }
 }

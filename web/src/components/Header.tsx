@@ -10,6 +10,9 @@ export interface SearchResult {
   slug: string;
   song: string;
   nights: SearchNight[];
+  /** Set when the song wasn't found in any loaded show's per-show rows but
+   *  has a meaningful tour-wide P(at least once) — see App.tsx `search`. */
+  tour?: { pct: string };
 }
 
 interface HeaderProps {
@@ -97,6 +100,19 @@ export default function Header({ screen, onSelectScreen, search, onGotoShow }: H
                       {n.label} <span className="pct">{n.pct}</span>
                     </button>
                   ))}
+                  {r.nights.length === 0 && r.tour && (
+                    <button
+                      className="tour-chip mono"
+                      title="P(at least once) across all scheduled shows — open Tours"
+                      onClick={() => {
+                        setOpen(false);
+                        setQuery("");
+                        onSelectScreen("tours");
+                      }}
+                    >
+                      {r.tour.pct} <span className="tour-chip-label">this tour</span>
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

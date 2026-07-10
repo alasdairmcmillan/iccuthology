@@ -20,16 +20,19 @@ function shortDate(showdate: string): string {
   return `${SHORT_MONTHS[m - 1]} ${d}`;
 }
 
+// Canonical display order for dist buckets. Current epochs publish
+// 0/1/2/3/4+; epochs published before the 4+ split have 0/1/2/3+, so we
+// render whichever keys the artifact actually carries.
+const DIST_BUCKET_ORDER = ["0", "1", "2", "3", "3+", "4+"];
+function distBuckets(dist: Record<string, number>): string[] {
+  return DIST_BUCKET_ORDER.filter((k) => k in dist);
+}
+
 // A song is played a whole number of times; the fractional "expected_plays" is a
 // mean. Report the most likely integer count and our confidence in it, straight
 // from the play-count distribution the simulator already produces.
 function mostLikelyPlays(dist: Record<string, number>): { label: string; prob: number } {
-  const entries: { label: string; prob: number }[] = [
-    { label: "0", prob: dist["0"] },
-    { label: "1", prob: dist["1"] },
-    { label: "2", prob: dist["2"] },
-    { label: "3+", prob: dist["3+"] },
-  ];
+  const entries = distBuckets(dist).map((k) => ({ label: k, prob: dist[k] }));
   return entries.reduce((best, e) => (e.prob > best.prob ? e : best), entries[0]);
 }
 
@@ -161,24 +164,32 @@ export default function ToursScreen({
             <div className="tour-scroll">
               <div className="tour-grid-head">
                 <span>Song</span>
-                <span style={{ textAlign: "right" }}>Most likely</span>
-                <span style={{ textAlign: "right" }}>P(≥1)</span>
-                <span>Bucket</span>
-                <span>Dist 0/1/2/3+</span>
-                <span style={{ textAlign: "right" }}>Analytic</span>
+                <span style={{ textAlign: "center" }}>
+                  <span className="when-wide">Plays · Conf %</span>
+                  <span className="when-narrow">Plays</span>
+                </span>
+                <span style={{ textAlign: "center" }}>P(≥1)</span>
+                <span style={{ textAlign: "center" }}>Bucket</span>
+                <span style={{ textAlign: "center" }}>
+                  Dist{" "}
+                  {tourData.rows.length
+                    ? distBuckets(tourData.rows[0].dist).join("/")
+                    : "0/1/2/3/4+"}
+                </span>
               </div>
               {tourData.rows.map((r) => {
                 const bc = bucketColor(r.bucket, ACCENT);
-                const dist = `${Math.round(r.dist["0"] * 100)}/${Math.round(
-                  r.dist["1"] * 100,
-                )}/${Math.round(r.dist["2"] * 100)}/${Math.round(r.dist["3+"] * 100)}%`;
+                const dist =
+                  distBuckets(r.dist)
+                    .map((k) => Math.round(r.dist[k] * 100))
+                    .join("/") + "%";
                 const ml = mostLikelyPlays(r.dist);
                 return (
                   <div className="tour-grid-row" key={r.slug}>
                     <span className="r-song">{r.song}</span>
                     <span
                       className="r-num"
-                      title={`mean ${r.expected_plays.toFixed(2)} plays`}
+                      title={`mean ${r.expected_plays.toFixed(2)} plays · analytic ${r.analytic_p.toFixed(2)}`}
                     >
                       {ml.label} · {Math.round(ml.prob * 100)}%
                     </span>
@@ -190,7 +201,6 @@ export default function ToursScreen({
                       {r.bucket}
                     </span>
                     <span className="r-dist">{dist}</span>
-                    <span className="r-analytic">{r.analytic_p.toFixed(2)}</span>
                   </div>
                 );
               })}

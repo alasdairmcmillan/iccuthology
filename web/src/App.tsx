@@ -111,9 +111,22 @@ export default function App() {
           });
         }
       }
+      // Fall back to tour-level P(≥1) for songs absent from every loaded
+      // show's (truncated) per-show rows — e.g. low per-night-probability
+      // songs that still have a meaningful chance across the whole tour.
+      for (const r of tour?.rows ?? []) {
+        if (seen.has(r.slug)) continue;
+        if (!r.song.toLowerCase().includes(q)) continue;
+        seen.set(r.slug, {
+          slug: r.slug,
+          song: r.song,
+          nights: [],
+          tour: { pct: pct(r.p_at_least_one) },
+        });
+      }
       return Array.from(seen.values()).slice(0, 6);
     };
-  }, [showsByDate, meta]);
+  }, [showsByDate, meta, tour]);
 
   const gotoShow = (date: string) => {
     setSelectedShows([date]);
