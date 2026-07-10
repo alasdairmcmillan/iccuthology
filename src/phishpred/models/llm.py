@@ -280,6 +280,41 @@ def get_client(
     )
 
 
+# Per-provider default model id, shared by the CLI's --provider options and
+# "llm:<provider>" model specs. openai-compat endpoints serve arbitrary open
+# models, so they must name theirs explicitly.
+DEFAULT_MODELS: dict[str, str | None] = {
+    "anthropic": "claude-sonnet-5",
+    "openai": "gpt-4.1",
+    "google": "gemini-2.5-flash",
+    "openai-compat": None,
+}
+
+
+def parse_model_spec(spec: str) -> tuple[str, str]:
+    """Parse an ``llm:<provider>[:<model-id>]`` model string into
+    ``(provider, model_id)``, falling back to ``DEFAULT_MODELS`` when the model
+    id is omitted.
+
+    Raises ``LLMError`` on a malformed spec (bad prefix, empty provider, or a
+    provider with no default and no explicit model id) so callers can treat a
+    bad source string the same as any other LLM failure.
+    """
+    parts = spec.split(":", 2)
+    if parts[0] != "llm" or len(parts) < 2 or not parts[1]:
+        raise LLMError(
+            f"Invalid LLM model spec {spec!r}; expected 'llm:<provider>[:<model-id>]'."
+        )
+    provider = parts[1]
+    model_id = parts[2] if len(parts) == 3 and parts[2] else DEFAULT_MODELS.get(provider)
+    if not model_id:
+        raise LLMError(
+            f"No default model id for provider {provider!r}; "
+            f"use 'llm:{provider}:<model-id>'."
+        )
+    return provider, model_id
+
+
 # --------------------------------------------------------------------------- #
 # Structured output schema
 # --------------------------------------------------------------------------- #

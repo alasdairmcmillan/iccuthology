@@ -164,11 +164,14 @@ def upcoming_shows(conn, venue_query: str | None = None, limit: int = 10) -> lis
     """Future shows (showdate >= today), optionally venue name/city ILIKE filter."""
 
 def predict_show(conn, showdate: str, model: str = "heuristic", half_life: int = 50,
-                 top: int = 30) -> ShowPrediction
+                 top: int = 30, llm_cache=None) -> ShowPrediction
     """Resolve show by date; features via features_for_future_show (works for past
-    shows too, for eyeballing); heuristic directly, or train lr/gbm on all history
-    (cache trained model per process). ShowPrediction: showdate, venue, city/state,
-    rows = [(song, prob, gap, drivers: list[str])], k."""
+    shows too, for eyeballing); heuristic directly, train lr/gbm on all history
+    (cache trained model per process), or "llm:<provider>[:<model-id>]" to score
+    via models.llm.LLMSongModel (disk PredictionCache, raises LLMError on
+    key/call failure; ShowPrediction.model is the resolved full name). Same
+    floor + renormalize-to-K for every source. ShowPrediction: showdate, venue,
+    city/state, rows = [(song, prob, gap, drivers: list[str])], k."""
 
 def render_prediction(pred, json_out: bool = False) -> str
     """rich table (song, prob %, gap, drivers) or JSON string."""
@@ -176,6 +179,7 @@ def render_prediction(pred, json_out: bool = False) -> str
 
 Drivers: for heuristic, names of multipliers ≠ 1 (e.g. "due×1.4", "played-prev-show×0.02")
 plus "decayed_rate=0.31". For ML, top |coef·x| terms for LR; skip SHAP for MVP.
+GBM and llm:* sources emit empty driver lists.
 
 ---
 

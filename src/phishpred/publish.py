@@ -25,6 +25,7 @@ from . import features
 from .config import era_for_year
 from .epoch import compute_epoch, utc_now_iso
 from .mcp.tools import _safe_label
+from .models.llm import LLMError
 from .modes import _round_floats, tour_mode
 from .predict import predict_show
 from .probs import renormalize_to_k
@@ -147,7 +148,9 @@ def _show_prediction_source(conn, showdate, model, half_life):
         {"song": r.song, "slug": r.slug, "prob": r.prob, "gap": r.gap, "drivers": r.drivers}
         for r in pred.rows
     ]
-    return pred, {"model": model, "kind": kind, "rows": rows}
+    # pred.model is the resolved name (an "llm:<provider>" spec becomes
+    # "llm:<provider>:<model-id>"); identical to `model` for heuristic/lr/gbm.
+    return pred, {"model": pred.model, "kind": kind, "rows": rows}
 
 
 def _fold_submissions(conn, submitted_dir, show_docs, half_life) -> None:
@@ -254,8 +257,11 @@ def publish(
 ) -> dict:
     """Write the full snapshot tree under `out_dir` and return meta.json's dict.
 
-    Deterministic given `seed`. `compare_models` are extra per-show statistical
-    columns (e.g. ["lr", "gbm"]). `sample_sims` (<= n_sims) ships a downsampled
+    Deterministic given `seed`. `compare_models` are extra per-show source
+    columns: statistical ("lr"/"gbm") or LLM ("llm:<provider>[:<model-id>]",
+    e.g. "llm:anthropic"). An llm:* compare source that fails with `LLMError`
+    (typically a missing provider API key in the scheduled workflow) is skipped
+    with a stderr warning instead of crashing the batch. `sample_sims` (<= n_sims) ships a downsampled
     samples.bin for a smaller client download while the reduced tables keep the
     full n_sims accuracy (deploy plan §11). `created_at` is injectable for
     reproducible tests (defaults to now, UTC)."""
@@ -341,14 +347,27 @@ def publish(
     # inside sample_setlist via strict_no_repeat. Each show gets its own
     # crc32-derived seed so consecutive nights decorrelate.
     show_docs: dict[str, dict] = {}
+    skipped_sources: set[str] = set()  # compare models disabled after an LLMError
     run_played: set[int] = set()   # predicted songids earlier in the CURRENT run
     prev_night: set[int] = set()   # previous predicted night's songids
     prev_venueid = None
     for pos, showdate in enumerate(horizon_dates):
+        # Headline-model LLM failures propagate: a snapshot without its headline
+        # source is not publishable. Compare sources are best-effort (below).
         pred, headline_src = _show_prediction_source(conn, showdate, model, half_life)
         sources = {model: headline_src}
         for cm in compare_models:
-            _p, src = _show_prediction_source(conn, showdate, cm, half_life)
+            if cm in skipped_sources:
+                continue
+            try:
+                _p, src = _show_prediction_source(conn, showdate, cm, half_life)
+            except LLMError as exc:
+                # An llm:* compare column must never take down the batch — the
+                # scheduled workflow may run without the provider's API key.
+                # Drop the source for the rest of the run (one warning).
+                print(f"publish: skipping compare source {cm!r}: {exc}", file=sys.stderr)
+                skipped_sources.add(cm)
+                continue
             sources[cm] = src
         show_docs[showdate] = {
             "showdate": showdate, "venue_name": pred.venue_name,
