@@ -378,12 +378,14 @@ a:hover {
   font-family: var(--font-mono);
   text-align: center;
 }
-/* Tour table centres everything except Song (badges are start-aligned elsewhere). */
-.tour-grid-row .badge {
+/* Tour table centres everything except Song (badges are start-aligned elsewhere).
+   The Bucket chip is wrapped in the popover anchor, so centre that too. */
+.tour-grid-row .badge,
+.tour-grid-row .stat-pop-anchor {
   justify-self: center;
 }
 
-/* --- Stat popover (Tours "Plays" cell) ----------------------------------- */
+/* --- Stat popover (Tours "Bucket" chip) ---------------------------------- */
 .stat-pop-anchor {
   cursor: pointer;
   display: inline-block;
