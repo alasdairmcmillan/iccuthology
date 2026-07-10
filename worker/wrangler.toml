@@ -3,6 +3,15 @@ main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Top-level keys must precede any [table] header, or TOML assigns them to that
+# table. `custom_domain` routes take a bare hostname (no /* path pattern) and
+# auto-create the DNS record + cert on the zone.
+account_id = "1130329d2224c95ef8e9feb8b438f47c"
+routes = [
+  { pattern = "iccuthology.com", custom_domain = true },
+  { pattern = "www.iccuthology.com", custom_domain = true },
+]
+
 # --- Static assets: the built React app (see ../web) -----------------------
 # Build the frontend first (`npm run build` in ../web`) so `../web/dist`
 # exists before `wrangler dev` / `wrangler deploy`.
@@ -24,16 +33,5 @@ run_worker_first = ["/api/*"]
 #   wrangler r2 bucket create phish-predictor-snapshots-preview   # for `wrangler dev --remote` / preview
 [[r2_buckets]]
 binding = "SNAPSHOTS"
-bucket_name = "REPLACE_ME_R2_BUCKET_NAME"
+bucket_name = "phish-predictor"
 # preview_bucket_name = "REPLACE_ME_R2_BUCKET_NAME_PREVIEW"
-
-# --- Account / routing placeholders -----------------------------------------
-# Required for `wrangler deploy` outside a workers.dev-only setup. Fill in:
-#   account_id  = your Cloudflare account id (`wrangler whoami`)
-#   routes      = the custom domain/zone this Worker should answer on
-# Left commented so `wrangler deploy --dry-run` and local `wrangler dev` work
-# without Cloudflare credentials.
-# account_id = "REPLACE_ME_CLOUDFLARE_ACCOUNT_ID"
-# routes = [
-#   { pattern = "yourdomain.com/*", custom_domain = true }
-# ]
