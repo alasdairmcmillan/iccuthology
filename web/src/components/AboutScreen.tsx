@@ -128,8 +128,27 @@ export default function AboutScreen() {
       <div className="about-blurb">
         <div className="label-caps">From the creator</div>
         <p>
-          [ Your blurb goes here — the story behind the project, why you built it, whatever
-          you want folks to know. Replace this placeholder in AboutScreen.tsx. ]
+          In the lot before my{" "}
+          <a
+            href="https://phish.net/setlists/phish-august-13-2009-darien-lake-performing-arts-center-darien-center-ny-usa.html"
+            target="_blank"
+            rel="noreferrer"
+          >
+            first Phish show
+          </a>
+          , someone asked me what I thought they'd open with. I had no goddamn idea.
+        </p>
+        <p>
+          Fast-forward to July 2026, I'm about to head to Deer Creek for shows 7-10, and I
+          think to myself: what if I point the current state-of-the-art frontier AI at the
+          phish.net dataset? 24 hours later, I still have no real idea what they're going to
+          play. But as with most events that aren't planned, it's fun to speculate.
+        </p>
+        <p>
+          —{" "}
+          <a href="https://phish.net/user/apockalupsis" target="_blank" rel="noreferrer">
+            Ali
+          </a>
         </p>
       </div>
 
