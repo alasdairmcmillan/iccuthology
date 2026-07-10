@@ -71,13 +71,14 @@ def predict(
     showdate: str = typer.Argument(None, help="Show date yyyy-mm-dd (omit with --venue)"),
     venue: str = typer.Option(None, help="Predict upcoming shows matching this venue/city substring"),
     next_n: int = typer.Option(3, "--next", help="With --venue: how many upcoming shows"),
-    model: str = typer.Option("heuristic", help="heuristic | lr | gbm"),
+    model: str = typer.Option("heuristic", help="heuristic | lr | gbm | llm:<provider>[:<model-id>]"),
     half_life: int = typer.Option(50),
     top: int = typer.Option(30, help="Rows to display"),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of a table"),
 ) -> None:
     """Predict a setlist for one show date, or the next N shows at a venue."""
     from .db import get_connection
+    from .models.llm import LLMError
     from .predict import predict_show, render_prediction, upcoming_shows
 
     conn = get_connection()
@@ -94,18 +95,12 @@ def predict(
         raise typer.Exit(2)
 
     for d in dates:
-        pred = predict_show(conn, d, model=model, half_life=half_life, top=top)
+        try:
+            pred = predict_show(conn, d, model=model, half_life=half_life, top=top)
+        except LLMError as exc:
+            typer.echo(str(exc))
+            raise typer.Exit(1)
         typer.echo(render_prediction(pred, json_out=json_out))
-
-
-# Per-provider default model for the LLM path (§7a). Kept here so the CLI can
-# offer `--provider` without forcing `--model`.
-_LLM_DEFAULT_MODEL = {
-    "anthropic": "claude-sonnet-5",
-    "openai": "gpt-4.1",
-    "google": "gemini-2.5-flash",
-    "openai-compat": None,  # open-model endpoints must name their model explicitly
-}
 
 
 @app.command()
@@ -226,9 +221,9 @@ def setlist(
 
     conn = get_connection()
     if llm:
-        from .models.llm import LLMError, get_client
+        from .models.llm import DEFAULT_MODELS, LLMError, get_client
 
-        model_id = model or _LLM_DEFAULT_MODEL.get(provider)
+        model_id = model or DEFAULT_MODELS.get(provider)
         if model_id is None:
             typer.echo(f"--model is required for provider {provider!r}")
             raise typer.Exit(2)
@@ -252,9 +247,15 @@ def llm_backtest_cmd(
 ) -> None:
     """Benchmark the LLM-as-model (§7a) on the same holdout as heuristic/LR/GBM."""
     from .db import get_connection
-    from .models.llm import LLMSongModel, get_client, llm_backtest, render_llm_backtest
+    from .models.llm import (
+        DEFAULT_MODELS,
+        LLMSongModel,
+        get_client,
+        llm_backtest,
+        render_llm_backtest,
+    )
 
-    model_id = model or _LLM_DEFAULT_MODEL.get(provider)
+    model_id = model or DEFAULT_MODELS.get(provider)
     if model_id is None:
         typer.echo(f"--model is required for provider {provider!r}")
         raise typer.Exit(2)
@@ -281,7 +282,7 @@ def epoch(
     n_sims: int = typer.Option(2000, "--n-sims"),
     seed: int = typer.Option(0),
     half_life: int = typer.Option(50),
-    compare_models: str = typer.Option(None, "--compare-models", help="Extra per-show columns folded into the epoch, comma-separated (e.g. lr,gbm)"),
+    compare_models: str = typer.Option(None, "--compare-models", help="Extra per-show columns folded into the epoch, comma-separated (e.g. lr,gbm,llm:anthropic)"),
 ) -> None:
     """Print the current epoch and whether it differs from the last published one.
 
@@ -314,7 +315,7 @@ def publish(
     with_samples: bool = typer.Option(False, "--with-samples", help="Also emit samples.bin + samples_meta.json"),
     sample_sims: int = typer.Option(None, "--sample-sims", help="Ship a downsampled samples.bin of this many sims (tables keep --n-sims accuracy)"),
     with_catalog: bool = typer.Option(False, "--with-catalog", help="Emit catalog.json (history for the personalized 'due to see' view)"),
-    compare_models: str = typer.Option(None, "--compare-models", help="Extra per-show columns, comma-separated (e.g. lr,gbm)"),
+    compare_models: str = typer.Option(None, "--compare-models", help="Extra per-show columns, comma-separated (e.g. lr,gbm,llm:anthropic)"),
     submitted: str = typer.Option(None, help="Submissions inbox dir to fold in as mcp:<label> sources"),
 ) -> None:
     """Compute every publishable artifact for the current epoch -> JSON (+ samples).

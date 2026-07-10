@@ -44,7 +44,7 @@ secret**. Add:
 | `R2_SECRET_ACCESS_KEY`   | from the R2 API token (step 2)                       |
 | `R2_BUCKET`              | bucket name (step 1)                                 |
 | `PHISHNET_API_KEY`       | phish.net API key (https://phish.net/api/keys)       |
-| `ANTHROPIC_API_KEY`      | optional — reserved for the future built-in `llm:*` prediction column, which is **not yet wired into publish** (see §8); harmless to set now |
+| `ANTHROPIC_API_KEY`      | optional — used by the built-in `llm:*` prediction column when `--compare-models` includes an `llm:anthropic[:...]` source (see §8). If absent, publish skips that source with a warning instead of failing |
 
 All four `R2_*` secrets are required by `scripts/r2_common.py`; a missing
 one raises a clear `RuntimeError` naming which var is absent (fails fast in
@@ -172,10 +172,23 @@ show pages as extra source columns. Full tool reference: `docs/MCP.md`.
 
 Two related-but-different LLM paths, for clarity:
 
-- **Built-in `llm:*` per-song column** (`models/llm.py` `LLMSongModel`): only
-  wired to the offline `phishpred llm-backtest` command today.
-  `publish --compare-models` accepts `lr`/`gbm` only — passing `llm:*` is not
-  yet supported, which is why `ANTHROPIC_API_KEY` in the workflow is currently
-  unused (§3).
+- **Built-in `llm:*` per-song column** (`models/llm.py` `LLMSongModel`):
+  wired into `predict_show` / `publish --compare-models` (and still available
+  offline via `phishpred llm-backtest`). Pass a model string like
+  `llm:anthropic` (provider default model) or
+  `llm:anthropic:claude-sonnet-5`; the published show docs gain a
+  `sources["llm:..."]` column with `kind: "llm"` (DEPLOY-CONTRACTS.md §2).
+  Probabilities are floored/renormalized to K exactly like the statistical
+  sources, and raw responses are cached on disk per
+  `(showid, model, prompt_version)` so a republish of the same epoch never
+  re-bills. If the provider key (e.g. `ANTHROPIC_API_KEY`, §3) is missing or
+  the call fails, publish skips that source with a stderr warning — the batch
+  never crashes on it.
+
+  **Operator switch:** the epoch hash includes `compare_models`, so enabling
+  the column is a one-line edit to the workflow's `MODEL_PARAMS` in
+  `.github/workflows/publish.yml` — append `--compare-models llm:anthropic`
+  (it feeds both the epoch gate and the publish step). The changed epoch makes
+  the next run republish with the new column; no other wiring needed.
 - **LLM setlist assembler** (`phishpred setlist <date> --llm`): CLI-only
   display; published setlist docs always come from the deterministic sampler.

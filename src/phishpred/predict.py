@@ -202,10 +202,22 @@ def predict_show(
     model: str = "heuristic",
     half_life: int = 50,
     top: int = 30,
+    llm_cache: object | None = None,
 ) -> ShowPrediction:
-    """Resolve a show by date and return ranked per-song probabilities."""
-    if model not in ("heuristic", "lr", "gbm"):
-        raise ValueError(f"Unknown model {model!r}; expected 'heuristic', 'lr', or 'gbm'.")
+    """Resolve a show by date and return ranked per-song probabilities.
+
+    ``model`` is ``heuristic``/``lr``/``gbm``, or ``llm:<provider>[:<model-id>]``
+    (e.g. ``llm:anthropic`` or ``llm:anthropic:claude-sonnet-5``) to score the
+    show with ``models.llm.LLMSongModel``. LLM failures (missing API key,
+    network, malformed response, bad spec) raise ``models.llm.LLMError``.
+    ``llm_cache`` overrides the LLM path's disk ``PredictionCache`` (tests);
+    the default cache means repeated calls for the same show never re-bill.
+    """
+    if model not in ("heuristic", "lr", "gbm") and not model.startswith("llm:"):
+        raise ValueError(
+            f"Unknown model {model!r}; expected 'heuristic', 'lr', 'gbm', "
+            "or 'llm:<provider>[:<model-id>]'."
+        )
 
     show = _resolve_show(conn, showdate)
     venue = _resolve_venue(conn, show["venueid"])
@@ -220,12 +232,32 @@ def predict_show(
     year = int(str(show["showdate"])[:4])
     k = features.mean_setlist_size(conn, era_for_year(year))
 
+    model_label = model
     if model == "heuristic":
         import phishpred.models.heuristic as heuristic_mod
 
         pred_df = heuristic_mod.heuristic_predict(feat_df, k)
         driver_fn = _heuristic_drivers
         trained = None
+    elif model.startswith("llm:"):
+        import phishpred.models.llm as llm_mod
+        import phishpred.models.ml as ml_mod
+
+        provider, model_id = llm_mod.parse_model_spec(model)
+        client = llm_mod.get_client(provider, model_id)
+        song_model = llm_mod.LLMSongModel(
+            client, provider=provider, cache=llm_cache,
+            k_hint_fn=lambda _df, _k=float(k): _k,
+        )
+        # Resolved name ("llm:<provider>:<model-id>") so a defaulted model id
+        # still shows up in the output/publish artifacts.
+        model_label = song_model.name
+        # Same floor (LLMSongModel.floor_prob) + per-show renormalization to K
+        # (ml_predict) as every other calibrated source.
+        pred_df = ml_mod.ml_predict(song_model, feat_df, k)
+
+        def driver_fn(_row: pd.Series) -> list[str]:
+            return []  # no per-song explanation from the LLM path (as with GBM)
     else:
         trained = _get_or_train_model(conn, model, half_life)
         import phishpred.models.ml as ml_mod
@@ -256,7 +288,7 @@ def predict_show(
         venue_name=venue_name,
         city=city,
         state=state,
-        model=model,
+        model=model_label,
         k=float(k),
         half_life=half_life,
         rows=rows,

@@ -121,14 +121,20 @@ Rows sorted by `expected_plays` desc. Buckets per `modes._bucket_for`.
       ]
     }
     // "lr", "gbm": same shape when --compare-models includes them.
-    // "llm:claude-sonnet-5": {"model": "...", "kind": "llm", "rows": [...]} when keys present.
+    // "llm:anthropic": {"model": "llm:anthropic:claude-sonnet-5", "kind": "llm", "rows": [...]}
+    //   when --compare-models includes an llm:<provider>[:<model-id>] spec.
     // "mcp:<label>": {"model": "...", "kind": "mcp", "rationale": "...", "submitted_at": "...", "rows": [...]}
   }
 }
 ```
 Each `sources[*].rows` sorted by `prob` desc. Statistical/LLM rows come from
-`predict_show` / `models.llm`. `mcp:*` sources are folded in from the submissions
-inbox (§5).
+`predict_show` / `models.llm`; both are floored and renormalized to K the same
+way. The source key is the `--compare-models` string as passed; the `model`
+field is the resolved name (a defaulted model id filled in). An `llm:*` compare
+source whose call fails (missing provider API key, network, malformed response)
+is dropped for the rest of the batch with a stderr warning — publish never
+crashes on it, and `meta.json`'s `models` still lists it as declared. `mcp:*`
+sources are folded in from the submissions inbox (§5).
 
 ### setlist/{showdate}.json  (mirrors `SetlistPrediction`)
 ```json
