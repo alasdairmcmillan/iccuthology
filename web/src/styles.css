@@ -382,6 +382,54 @@ a:hover {
 .tour-grid-row .badge {
   justify-self: center;
 }
+
+/* --- Stat popover (Tours "Plays" cell) ----------------------------------- */
+.stat-pop-anchor {
+  cursor: pointer;
+  display: inline-block;
+}
+.stat-pop {
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 60;
+  width: 230px;
+  background: #101820;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-md);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  padding: 12px 14px;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.stat-pop-line {
+  margin-bottom: 6px;
+}
+.stat-pop-line strong {
+  color: var(--text-primary);
+}
+.stat-pop-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  margin: 8px 0 4px;
+}
+.stat-pop-dist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.stat-pop-dist li {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+.stat-pop-dist li span:last-child {
+  color: var(--accent);
+  font-weight: 700;
+}
 .no-data-card {
   background: var(--bg-card);
   border: 1px dashed var(--border-input);
@@ -763,7 +811,10 @@ a:hover {
 .about-blurb p {
   color: var(--text-muted);
   font-style: italic;
-  margin: 0;
+  margin: 0 0 12px;
+}
+.about-blurb p:last-child {
+  margin-bottom: 0;
 }
 .attribution {
   color: var(--text-label);
@@ -837,9 +888,15 @@ a:hover {
 }
 .personal-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 100px 110px 130px 170px;
+  grid-template-columns: minmax(0, 1fr) 110px 130px 170px;
   gap: 8px;
   align-items: center;
+}
+.personal-plays-inline {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
 }
 .personal-grid-head {
   padding: 14px 12px 10px;
@@ -901,7 +958,30 @@ a:hover {
     min-width: 460px;
   }
   .personal-grid {
-    min-width: 560px;
+    min-width: 460px;
+  }
+}
+
+/* Mobile personal grid: no sideways scroll — drop Last played and
+   P(finally see it), keep Song (Plays) | Most likely show, and let the
+   show column wrap onto two lines instead of truncating. */
+@media (max-width: 640px) {
+  .personal-layout .card {
+    overflow-x: visible;
+  }
+  .personal-grid-head span:nth-child(2),
+  .personal-grid-head span:nth-child(3),
+  .personal-grid-row .personal-dim,
+  .personal-grid-row .run-p {
+    display: none;
+  }
+  .personal-grid {
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr) 120px;
+  }
+  .run-night {
+    white-space: normal;
+    line-height: 1.35;
   }
 }
 

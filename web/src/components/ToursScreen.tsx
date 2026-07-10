@@ -5,6 +5,7 @@ import { ACCENT, bucketColor } from "../theme";
 import { monthLabel, pct1 } from "../lib/format";
 import { songPageSize } from "../lib/paging";
 import Pager from "./Pager";
+import StatPopover from "./StatPopover";
 
 interface ToursScreenProps {
   meta: Meta;
@@ -36,6 +37,12 @@ function distBuckets(dist: Record<string, number>): string[] {
 function mostLikelyPlays(dist: Record<string, number>): { label: string; prob: number } {
   const entries = distBuckets(dist).map((k) => ({ label: k, prob: dist[k] }));
   return entries.reduce((best, e) => (e.prob > best.prob ? e : best), entries[0]);
+}
+
+// "0" -> "0 plays", "1" -> "1 play", "3+"/"4+" -> "3+ plays"/"4+ plays".
+function distLabel(bucket: string): string {
+  if (bucket === "1") return "1 play";
+  return `${bucket} plays`;
 }
 
 // DESIGN-DECISION: placeholder sub-labels for tours with no cached data. The API
@@ -194,12 +201,32 @@ export default function ToursScreen({
                 return (
                   <div className="tour-grid-row" key={r.slug}>
                     <span className="r-song">{r.song}</span>
-                    <span
-                      className="r-num"
-                      title={`mean ${r.expected_plays.toFixed(2)} plays · analytic ${r.analytic_p.toFixed(2)}`}
+                    <StatPopover
+                      triggerClassName="r-num"
+                      trigger={
+                        <>
+                          {ml.label}
+                          <span className="when-wide"> · {Math.round(ml.prob * 100)}%</span>
+                        </>
+                      }
                     >
-                      {ml.label} · {Math.round(ml.prob * 100)}%
-                    </span>
+                      <div className="stat-pop-line">
+                        <strong>{pct1(r.p_at_least_one)}</strong> chance of 1+ plays
+                      </div>
+                      <div className="stat-pop-line">
+                        mean <strong>{r.expected_plays.toFixed(2)}</strong> plays · analytic{" "}
+                        <strong>{r.analytic_p.toFixed(2)}</strong>
+                      </div>
+                      <div className="stat-pop-label">Probability distribution</div>
+                      <ul className="stat-pop-dist">
+                        {distBuckets(r.dist).map((k) => (
+                          <li key={k}>
+                            <span>{distLabel(k)}</span>
+                            <span>{pct1(r.dist[k])}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </StatPopover>
                     <span className="r-p">{pct1(r.p_at_least_one)}</span>
                     <span
                       className="badge"
