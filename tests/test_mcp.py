@@ -289,6 +289,16 @@ def test_submit_prediction_sanitizes_model_label_for_path(conn, tmp_path):
     assert Path(result["path"]).parent.name == "Claude-Desktop-v2"
 
 
+def test_tool_docstrings_state_run_repeat_ground_rules():
+    """The rotation ground rules must reach an agent that only reads tool
+    descriptions (docs/MCP.md "Ground rules")."""
+    assert "played_in_run" in tools.candidate_features.__doc__
+    assert "played_prev_show" in tools.candidate_features.__doc__
+    assert "Ground rules" in tools.submit_prediction.__doc__
+    assert "played_in_run" in tools.submit_prediction.__doc__
+    assert "run" in tools.run_context.__doc__
+
+
 def test_submit_prediction_honors_explicit_epoch_and_timestamp(conn, tmp_path):
     result = tools.submit_prediction(
         "2026-07-09",

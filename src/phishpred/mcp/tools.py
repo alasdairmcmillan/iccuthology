@@ -99,6 +99,11 @@ def candidate_features(
     compacted to the columns useful for an agent's reasoning (drops
     ``showid``/``show_index``/``y`` plumbing). Sorted by ``decayed_rate``
     descending, capped at ``top`` rows.
+
+    Ground rules: ``played_in_run`` (already played earlier this run) and
+    ``played_prev_show`` (played the immediately preceding show) flag songs
+    that are essentially never / rarely (~2%) repeated -- see docs/MCP.md
+    "Ground rules".
     """
     show = predict._resolve_show(conn, showdate)
     df = features.features_for_future_show(conn, show["showid"], half_life)
@@ -289,6 +294,9 @@ def run_context(conn: sqlite3.Connection, showdate: str) -> dict[str, Any]:
     """The multi-night run ``showdate`` belongs to (maximal chain of shows at
     the same canonical venue), including already-played nights' setlists.
     Future nights carry ``played: False`` and no ``setlist`` key.
+
+    Use the already-played nights to rule out same-run repeats when
+    predicting a later night -- see docs/MCP.md "Ground rules".
     """
     target = predict._resolve_show(conn, showdate)
     target_showid = target["showid"]
@@ -388,6 +396,11 @@ def submit_prediction(
     scaled DOWN only if their sum exceeds the show's expected setlist size K, so
     a partial shortlist keeps its submitted probabilities instead of being
     inflated by renormalization.
+
+    Ground rules: avoid high probabilities for songs flagged
+    ``played_in_run``/``played_prev_show`` by ``candidate_features``, and keep
+    multi-night submissions for one run jointly consistent -- see docs/MCP.md
+    "Ground rules".
     """
     if not predictions:
         raise ValueError("predictions must not be empty")

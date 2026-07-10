@@ -53,6 +53,12 @@ HARD_PAIRING_DOMINANCE = 0.9
 HARD_PAIRING_MIN_SUPPORT = 5
 BIGRAM_MIN_SUPPORT = 5
 
+# Weight multiplier applied to a candidate that was played the immediately
+# previous horizon night at a DIFFERENT venue (soft cross-venue discouragement).
+# Mirrors models.heuristic's m_prev_show constant (0.02): Phish very rarely
+# repeats a song on adjacent nights even across venues.
+PREV_NIGHT_DISCOURAGE = 0.02
+
 # Segue marks in performances.trans_mark, after stripping whitespace. Real
 # ingested data stores ' > ' / ' -> ' (with spaces); some test fixtures use
 # the unspaced '>' / '->' -- stripping before comparing handles both.
@@ -337,6 +343,7 @@ def _fill_skeleton(
     slot_props: dict[int, dict[str, float]],
     predecessor_to_followers: dict[int, list[int]],
     followers_set: set[int],
+    excluded: set[int] | None = None,
 ) -> tuple[dict[tuple[str, int], int], dict[str, list[tuple[int, int, str]]]]:
     """Draw a songid for every (set_label, rank) slot in the skeleton.
 
@@ -349,10 +356,16 @@ def _fill_skeleton(
     very next position of the same set (chains resolve iteratively), and if
     no room exists there the follower is simply dropped -- it never appears
     without its predecessor immediately before it.
+
+    ``excluded`` songids are hard-masked: the caller has already dropped them
+    from ``probs`` (so they can never be drawn), and they are additionally
+    barred from FORCE-placement here -- a hard-paired follower that was
+    played earlier in the run must not sneak back in behind its predecessor.
     """
     by_set = _positions_by_set(skeleton)
     assigned: dict[tuple[str, int], int] = {}
     used: set[int] = set()
+    excluded = excluded or set()
 
     def draw(slot_type: str) -> int | None:
         pool = [sid for sid in probs if sid not in used and sid not in followers_set]
@@ -379,7 +392,7 @@ def _fill_skeleton(
             next_rank = current_rank + 1
             if (label, next_rank) in assigned:
                 return
-            placed = next((f for f in followers if f not in used), None)
+            placed = next((f for f in followers if f not in used and f not in excluded), None)
             if placed is None:
                 return
             assigned[(label, next_rank)] = placed
@@ -459,6 +472,9 @@ def sample_setlist(
     half_life: int = 50,
     seed: int = 0,
     skeleton: dict[str, int] | None = None,
+    strict_no_repeat: bool = True,
+    exclude_songids: set[int] | None = None,
+    discourage_songids: set[int] | None = None,
 ) -> SetlistPrediction:
     """Deterministic (given ``seed``) structured sampler -- plan §6c-i.
 
@@ -469,6 +485,24 @@ def sample_setlist(
        replacement, honoring mined hard pairings and preferring mined segue
        bigrams for marks between adjacent songs (see ``_fill_skeleton`` /
        ``_build_sets``).
+
+    Run-scope no-repeat semantics (mirrors ``simulate.SimConfig.strict_no_repeat``):
+
+    - ``strict_no_repeat`` (default True) hard-masks (drops from the candidate
+      pool) any song whose ``played_in_run`` feature fires -- i.e. it was
+      ACTUALLY played on an earlier, already-ingested night of the same
+      multi-night run (publishing mid-run). Phish essentially never repeats a
+      song within a run.
+    - ``exclude_songids`` hard-masks these too. The publish loop passes songids
+      it already placed in earlier PREDICTED nights of the same run.
+    - ``discourage_songids`` multiplies each song's weight by
+      ``PREV_NIGHT_DISCOURAGE`` (0.02, the heuristic's m_prev_show constant):
+      songs predicted for the immediately previous horizon night at a DIFFERENT
+      venue. Relative weights are all that matter to the skeleton-filling
+      draws, so no renormalization is needed.
+
+    Hard-masked songs also cannot be force-placed as hard-paired followers
+    (see ``_fill_skeleton``).
 
     Encore/opener/closer songs naturally skew toward historically "clean"
     (high encore-propensity) or jam-vehicle (high set2-mid-propensity) songs
@@ -490,6 +524,24 @@ def sample_setlist(
     slugs = {int(sid): slug for sid, slug in zip(pred_df["songid"], pred_df["slug"])}
     names = {int(sid): name for sid, name in zip(pred_df["songid"], pred_df["song_name"])}
 
+    masked: set[int] = set()
+    if strict_no_repeat and len(feat_df):
+        masked |= {
+            int(sid)
+            for sid, flag in zip(feat_df["songid"], feat_df["played_in_run"])
+            if flag
+        }
+    if exclude_songids:
+        masked |= {int(sid) for sid in exclude_songids}
+    if masked:
+        probs = {sid: p for sid, p in probs.items() if sid not in masked}
+    if discourage_songids:
+        dis = {int(sid) for sid in discourage_songids}
+        probs = {
+            sid: (p * PREV_NIGHT_DISCOURAGE if sid in dis else p)
+            for sid, p in probs.items()
+        }
+
     return _assemble_from_probs(
         conn,
         showdate=str(show["showdate"]),
@@ -500,6 +552,7 @@ def sample_setlist(
         names=names,
         seed=seed,
         skeleton=skeleton,
+        excluded=masked,
     )
 
 
@@ -514,6 +567,7 @@ def _assemble_from_probs(
     names: dict[int, str],
     seed: int,
     skeleton: dict[str, int] | None,
+    excluded: set[int] | None = None,
 ) -> SetlistPrediction:
     """Assembly core shared by ``sample_setlist`` (future-show path, probs
     from ``features_for_future_show``) and ``evaluate_sampler`` (backtest
@@ -525,7 +579,9 @@ def _assemble_from_probs(
     bigrams for adjacency marks (see ``_fill_skeleton`` / ``_build_sets``).
     Everything from the RNG through the returned ``SetlistPrediction`` lives
     here so both callers share identical assembly semantics; only the source
-    of ``probs`` differs.
+    of ``probs`` differs. ``excluded`` songids (already dropped from ``probs``
+    by the caller) are additionally barred from hard-pair force-placement;
+    the default (None) is a no-op, keeping the backtest path unchanged.
     """
     rng = np.random.default_rng(seed)
     if skeleton is None:
@@ -543,7 +599,7 @@ def _assemble_from_probs(
     followers_set = set(pairings.keys())
 
     assigned, by_set = _fill_skeleton(
-        rng, skeleton, probs, props, predecessor_to_followers, followers_set
+        rng, skeleton, probs, props, predecessor_to_followers, followers_set, excluded
     )
     sets = _build_sets(
         assigned, by_set, probs, slugs, names, stats.mark_lookup, bigrams, predecessor_to_followers
@@ -574,7 +630,12 @@ SETLIST_SYSTEM_PROMPT = (
     "close sets or the encore; well-known segue pairs (a song that is almost "
     "always followed by one specific other song) should be placed adjacently "
     "with an appropriate segue mark. Use ONLY the given slugs -- never invent "
-    "one. Do not repeat a slug. Respond only through the provided structured "
+    "one. Do not repeat a slug. Respect run scope: songs listed as already "
+    "played earlier in the current multi-night run (same venue, consecutive "
+    "nights) must NOT be selected -- Phish essentially never repeats a song "
+    "within a run; songs played the previous night at a different venue are "
+    "extremely unlikely to repeat (~2% chance) and should be avoided absent a "
+    "strong reason. Respond only through the provided structured "
     "schema: a 'sets' object whose keys are the skeleton's set labels and "
     "whose values are ordered arrays of {slug, segue_mark}, where segue_mark "
     "is '' for a normal transition, ' > ' for a segue, or ' -> ' for a hard "
@@ -612,9 +673,19 @@ def _render_llm_candidates(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_llm_user_prompt(showdate: str, skeleton: dict[str, int], candidates: list[dict]) -> str:
+def _build_llm_user_prompt(
+    showdate: str,
+    skeleton: dict[str, int],
+    candidates: list[dict],
+    excluded_slugs: list[str] | None = None,
+) -> str:
     lines = [f"Show date: {showdate}"]
     lines.append("Skeleton (set label -> song count): " + ", ".join(f"{k}={v}" for k, v in skeleton.items()))
+    if excluded_slugs:
+        lines.append(
+            "Already played earlier in this run -- do NOT select any of these: "
+            + ", ".join(excluded_slugs)
+        )
     lines.append(f"Number of candidates: {len(candidates)}")
     lines.append("")
     lines.append("Candidates (slug | name | prob | slot propensities):")
@@ -653,6 +724,9 @@ def assemble_setlist_llm(
     half_life: int = 50,
     n_candidates: int = 40,
     skeleton: dict[str, int] | None = None,
+    strict_no_repeat: bool = True,
+    exclude_songids: set[int] | None = None,
+    discourage_songids: set[int] | None = None,
 ) -> SetlistPrediction:
     """LLM-driven ordered assembly -- plan §6c-ii. ``client`` implements
     ``models.llm.LLMClient`` (injected so this is testable with a fake, no
@@ -667,6 +741,15 @@ def assemble_setlist_llm(
     full `songs` table as a defensive fallback); unknown slugs and repeated
     slugs are dropped, and a resolved-but-uncandidated song's probability is
     floored to ``models.llm.FLOOR_PROB`` since we have no real P(song) for it.
+
+    Run-scope no-repeat (matching the simulator's ``SimConfig.strict_no_repeat``
+    semantics): ``exclude_songids`` are songs already played earlier in the
+    same multi-night run. With ``strict_no_repeat`` (default) they are removed
+    from the shortlist before the cut, named in the user prompt as off-limits,
+    and dropped from the response even if the LLM selects one anyway; with
+    ``strict_no_repeat=False`` they stay selectable but are down-weighted by
+    ``PREV_NIGHT_DISCOURAGE``, exactly like ``discourage_songids`` (which are
+    soft-penalized regardless of the flag).
     """
     show = _resolve_show(conn, showdate)
     venue = _resolve_venue(conn, show["venueid"])
@@ -677,6 +760,17 @@ def assemble_setlist_llm(
     feat_df = features.features_for_future_show(conn, show["showid"], half_life)
     k = features.mean_setlist_size(conn, era)
     pred_df = heuristic_mod.heuristic_predict(feat_df, k)
+
+    exclude = set(exclude_songids or ())
+    discourage = set(discourage_songids or ())
+    if exclude and strict_no_repeat:
+        pred_df = pred_df[~pred_df["songid"].isin(exclude)]
+    else:
+        discourage |= exclude
+    if discourage:
+        pred_df = pred_df.copy()
+        mask = pred_df["songid"].isin(discourage)
+        pred_df.loc[mask, "prob"] = pred_df.loc[mask, "prob"] * PREV_NIGHT_DISCOURAGE
     pred_df = pred_df.sort_values("prob", ascending=False).head(n_candidates)
 
     if skeleton is None:
@@ -704,7 +798,15 @@ def assemble_setlist_llm(
     # full songs table rather than dropping it outright.
     global_slug_lookup = {r["slug"]: r["songid"] for r in conn.execute("SELECT slug, songid FROM songs")}
 
-    user = _build_llm_user_prompt(str(show["showdate"]), skeleton, candidates_payload)
+    excluded_slugs: list[str] = []
+    if exclude and strict_no_repeat:
+        marks = ",".join("?" * len(exclude))
+        excluded_slugs = sorted(
+            r["slug"]
+            for r in conn.execute(f"SELECT slug FROM songs WHERE songid IN ({marks})", tuple(exclude))
+        )
+
+    user = _build_llm_user_prompt(str(show["showdate"]), skeleton, candidates_payload, excluded_slugs)
     try:
         result = client.complete_json(SETLIST_SYSTEM_PROMPT, user, SETLIST_SCHEMA)
     except LLMError:
@@ -723,6 +825,8 @@ def assemble_setlist_llm(
             songid = slug_to_songid.get(slug, global_slug_lookup.get(slug))
             if songid is None or songid in used:
                 continue  # unknown or duplicate slug -- drop
+            if strict_no_repeat and songid in exclude:
+                continue  # played earlier in this run -- hard no-repeat
             used.add(songid)
             mark = item["segue_mark"] if item["segue_mark"] in ("", " > ", " -> ") else ""
             resolved.append((songid, slug, mark))

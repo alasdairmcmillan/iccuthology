@@ -221,7 +221,7 @@ class TourSongRow:
     slug: str
     expected_plays: float
     p_at_least_one: float
-    dist: dict[str, float]          # "0","1","2","3+" -> P(exactly n) over the horizon
+    dist: dict[str, float]          # "0","1","2","3","4+" -> P(exactly n) over the horizon
     bucket: str                     # lock | likely | longshot | bustout-watch
     gap_ratio: float | None         # from the first horizon show's candidate frame
     analytic_p: float               # Sigma over horizon shows of heuristic marginal P(song, show)
@@ -258,12 +258,13 @@ class TourReport:
         table.add_column("Expected", justify="right")
         table.add_column("P(>=1)", justify="right")
         table.add_column("Bucket")
-        table.add_column("Dist 0/1/2/3+")
+        table.add_column("Dist 0/1/2/3/4+")
         table.add_column("Analytic", justify="right")
         for row in self.rows:
             dist_str = (
                 f"{row.dist['0'] * 100:.0f}/{row.dist['1'] * 100:.0f}/"
-                f"{row.dist['2'] * 100:.0f}/{row.dist['3+'] * 100:.0f}%"
+                f"{row.dist['2'] * 100:.0f}/{row.dist['3'] * 100:.0f}/"
+                f"{row.dist['4+'] * 100:.0f}%"
             )
             table.add_row(
                 row.song,
@@ -344,7 +345,8 @@ def tour_mode(
             "0": (sum(1 for x in c if x == 0) / n) if n else 0.0,
             "1": (sum(1 for x in c if x == 1) / n) if n else 0.0,
             "2": (sum(1 for x in c if x == 2) / n) if n else 0.0,
-            "3+": (sum(1 for x in c if x >= 3) / n) if n else 0.0,
+            "3": (sum(1 for x in c if x == 3) / n) if n else 0.0,
+            "4+": (sum(1 for x in c if x >= 4) / n) if n else 0.0,
         }
         gr = gap_ratios.get(songid)
         slug, name = result.songs_meta.get(songid, (str(songid), str(songid)))

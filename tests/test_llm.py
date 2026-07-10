@@ -14,6 +14,7 @@ from phishpred.db import get_connection, init_db
 from phishpred.features import FEATURE_COLUMNS
 from phishpred.models.llm import (
     FLOOR_PROB,
+    SYSTEM_PROMPT,
     LLMError,
     LLMSongModel,
     PredictionCache,
@@ -125,6 +126,15 @@ def test_predict_scores_name_includes_provider_and_model(tmp_path, two_show_df):
     fake = FakeLLMClient(dict(RESPONSES))
     model = LLMSongModel(fake, cache=PredictionCache(cache_dir=tmp_path / "cache"))
     assert model.name == "llm:fake:fake-1"
+
+
+# --------------------------------------------------------------------------- #
+# System prompt states the rotation ground rules
+# --------------------------------------------------------------------------- #
+def test_system_prompt_states_run_repeat_ground_rules():
+    assert "played_in_run" in SYSTEM_PROMPT
+    assert "played_prev_show" in SYSTEM_PROMPT
+    assert "run" in SYSTEM_PROMPT
 
 
 # --------------------------------------------------------------------------- #

@@ -16,6 +16,7 @@ import json
 import re
 import sqlite3
 import sys
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -330,8 +331,20 @@ def publish(
                                         "n_sims": n_sims, "half_life": half_life, "rows": []})
 
     # --- per-show: show/{showdate}.json + setlist/{showdate}.json ------------
+    # Setlist run-context threading (mirrors simulate._horizon_steps): walking
+    # horizon_dates in order, consecutive horizon shows at the same canonical
+    # venueid (result.horizon_venueids, parallel to horizon_dates) form a run.
+    # Songs already placed in earlier PREDICTED nights of the current run are
+    # hard-excluded; the previous predicted night's songs are soft-discouraged
+    # when it was a DIFFERENT venue (same-run repeats are already excluded).
+    # Actual mid-run history (already-ingested nights of the run) is handled
+    # inside sample_setlist via strict_no_repeat. Each show gets its own
+    # crc32-derived seed so consecutive nights decorrelate.
     show_docs: dict[str, dict] = {}
-    for showdate in horizon_dates:
+    run_played: set[int] = set()   # predicted songids earlier in the CURRENT run
+    prev_night: set[int] = set()   # previous predicted night's songids
+    prev_venueid = None
+    for pos, showdate in enumerate(horizon_dates):
         pred, headline_src = _show_prediction_source(conn, showdate, model, half_life)
         sources = {model: headline_src}
         for cm in compare_models:
@@ -343,10 +356,23 @@ def publish(
             "sources": sources,
         }
         # setlist (deterministic sampler)
-        setlist = sample_setlist(conn, showdate, half_life=half_life, seed=seed)
+        venueid = result.horizon_venueids[pos] if pos < len(result.horizon_venueids) else None
+        same_run = venueid is not None and prev_venueid is not None and venueid == prev_venueid
+        if not same_run:
+            run_played = set()
+        show_seed = zlib.crc32(f"{seed}:{showdate}".encode())
+        setlist = sample_setlist(
+            conn, showdate, half_life=half_life, seed=show_seed,
+            exclude_songids=run_played if same_run else None,
+            discourage_songids=None if same_run else (prev_night or None),
+        )
+        placed = {s.songid for songs in setlist.sets.values() for s in songs}
+        run_played |= placed
+        prev_night = placed
+        prev_venueid = venueid
         setlist_doc = {
             "showdate": setlist.showdate, "venue_name": setlist.venue_name,
-            "era": setlist.era, "model": setlist.model, "seed": seed,
+            "era": setlist.era, "model": setlist.model, "seed": show_seed,
             "skeleton": setlist.skeleton,
             "sets": {
                 label: [

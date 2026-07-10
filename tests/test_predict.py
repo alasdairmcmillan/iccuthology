@@ -166,6 +166,7 @@ def _fake_features_for_future_show(conn, showid, half_life=50):
             "plays_this_tour": [0] * n,
             "plays_last_10": [0] * n,
             "plays_last_50": [0] * n,
+            "plays_last_150": [0] * n,
             "song_age_shows": [100] * n,
             "era_rate": [0.1] * n,
             "is_original": [1] * n,

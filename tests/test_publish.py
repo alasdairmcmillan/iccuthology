@@ -7,6 +7,7 @@ handful of 2026 future shows. Small n_sims for speed/determinism.
 from __future__ import annotations
 
 import json
+import zlib
 
 import pytest
 
@@ -108,7 +109,7 @@ def test_tour_json_shape(conn, tmp_path):
     assert exp == sorted(exp, reverse=True)
     row = tour["rows"][0]
     assert set(row) >= {"song", "slug", "expected_plays", "p_at_least_one", "dist", "bucket", "analytic_p"}
-    assert set(row["dist"]) == {"0", "1", "2", "3+"}
+    assert set(row["dist"]) == {"0", "1", "2", "3", "4+"}
     assert row["bucket"] in {"lock", "likely", "bustout-watch", "longshot"}
 
 
@@ -126,6 +127,64 @@ def test_show_and_setlist_shape(conn, tmp_path):
     setlist = json.loads((tmp_path / "setlist" / "2026-07-10.json").read_text())
     assert setlist["model"] == "sampler"
     assert setlist["sets"], "expected at least one set"
+
+
+# ---------------------------------------------------------------------------
+# Setlist run-context threading (no repeats within a run, per-show seeds)
+# ---------------------------------------------------------------------------
+def _setlist_doc(out, showdate):
+    doc = json.loads((out / "setlist" / f"{showdate}.json").read_text())
+    songids = [s["songid"] for songs in doc["sets"].values() for s in songs]
+    return doc, songids
+
+
+def test_publish_same_venue_run_setlists_never_overlap(conn, tmp_path):
+    # 2026-07-10 and 2026-07-11 are consecutive nights at Alpha (venue 1): the
+    # night-2 sampler must exclude every song predicted for night 1.
+    publish(conn, tmp_path, n_sims=N_SIMS, seed=SEED)
+    _d1, ids1 = _setlist_doc(tmp_path, "2026-07-10")
+    _d2, ids2 = _setlist_doc(tmp_path, "2026-07-11")
+    assert ids1, "night 1 should predict a non-empty setlist"
+    assert not set(ids1) & set(ids2)
+
+
+def test_publish_setlist_seed_is_crc32_derived_per_show(conn, tmp_path):
+    publish(conn, tmp_path, n_sims=N_SIMS, seed=SEED)
+    seeds = {}
+    for showdate in ("2026-07-10", "2026-07-11", "2026-07-18"):
+        doc, _ids = _setlist_doc(tmp_path, showdate)
+        assert doc["seed"] == zlib.crc32(f"{SEED}:{showdate}".encode())
+        seeds[showdate] = doc["seed"]
+    # decorrelation: every show gets its own seed, none reuse the global seed
+    assert len(set(seeds.values())) == 3
+    assert SEED not in seeds.values()
+
+
+def test_publish_different_venue_setlists_decorrelated(conn, tmp_path):
+    # 2026-07-11 (Alpha) -> 2026-07-18 (Beta): different venues, so night 3 is
+    # a fresh run. It must not be a carbon copy of night 2 (per-show seeds),
+    # and night-2 songs are discouraged (x0.02) rather than excluded.
+    publish(conn, tmp_path, n_sims=N_SIMS, seed=SEED)
+    _d2, ids2 = _setlist_doc(tmp_path, "2026-07-11")
+    d3, ids3 = _setlist_doc(tmp_path, "2026-07-18")
+    assert ids3, "fresh-venue night should predict a non-empty setlist"
+    assert ids2 != ids3
+    # any night-2 song that does sneak into night 3 carries the discouraged
+    # (0.02-scaled) probability, keeping it heavily underrepresented
+    for songs in d3["sets"].values():
+        for s in songs:
+            if s["songid"] in set(ids2):
+                assert s["prob"] < 0.05
+
+
+def test_publish_twice_yields_byte_identical_setlists(conn, tmp_path):
+    out1, out2 = tmp_path / "a", tmp_path / "b"
+    publish(conn, out1, n_sims=N_SIMS, seed=SEED, created_at="2026-07-09T00:00:00Z")
+    publish(conn, out2, n_sims=N_SIMS, seed=SEED, created_at="2026-07-09T00:00:00Z")
+    docs1 = sorted((out1 / "setlist").glob("*.json"))
+    assert docs1, "expected setlist docs"
+    for p in docs1:
+        assert p.read_bytes() == (out2 / "setlist" / p.name).read_bytes()
 
 
 def test_samples_bin_matches_resimulation(conn, tmp_path):

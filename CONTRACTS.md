@@ -66,7 +66,7 @@ ID_COLUMNS = ["showid", "showdate", "show_index", "venueid", "songid", "slug", "
 FEATURE_COLUMNS = ["decayed_rate", "gap", "gap_ratio", "played_prev_show",
                    "played_in_run", "venue_gap", "plays_this_tour",
                    "plays_last_10", "plays_last_50", "song_age_shows",
-                   "era_rate", "is_original"]
+                   "era_rate", "is_original", "plays_last_150"]
 
 def build_features(conn, half_life: int = 50) -> pd.DataFrame
     """One chronological sweep over all non-excluded shows with show_index NOT NULL.
@@ -98,6 +98,8 @@ Definitions (binding):
   play-to-play gaps; if <2 past plays, gap_ratio = 1.0).
 - `decayed_rate` = Σ_plays 0.5^((T−i)/H) / Σ_{all past shows i} 0.5^((T−i)/H).
 - `plays_this_tour`: same tourid as T, before T (0 if tourid NULL).
+- `plays_last_150` = plays within the last 150 shows (~5 years of touring; window
+  exported as `RECENT_RATE_WINDOW` for the heuristic's long-window rate floor).
 - `era_rate` = plays within era(T) before T / max(1, shows in era(T) before T).
 - `song_age_shows` = show_index(T) − show_index(first play observed in our data).
 - `is_original` from songs table (NULL → 0.5).
@@ -107,13 +109,19 @@ Definitions (binding):
 ```python
 def heuristic_scores(df: pd.DataFrame) -> pd.DataFrame
     """Input: feature frame (FEATURE_COLUMNS present). Returns copy with added
-    columns: `score` plus multiplier columns `m_prev_show`, `m_in_run`, `m_venue`,
-    `m_due` (the fired multipliers, for driver explanations).
-    score = decayed_rate * m_prev_show * m_in_run * m_venue * m_due
+    columns: `score` plus `recent_rate`, `w_recent`, and multiplier columns
+    `m_prev_show`, `m_in_run`, `m_venue`, `m_due` (for driver explanations).
+    score = base * m_prev_show * m_in_run * m_venue * m_due
+      recent_rate = plays_last_150 / RECENT_RATE_WINDOW
+      w_recent    = clip((4 - gap_ratio) / 3, 0, 1)   # 1 while gap_ratio<=1, 0 at >=4
+      base        = max(decayed_rate, w_recent * recent_rate)
       m_prev_show = 0.02 if played_prev_show else 1.0
       m_in_run    = 0.05 if played_in_run (and not prev show) else 1.0
       m_venue     = 0.3 if venue_gap <= 2 else 1.0
-      m_due       = 1 + 0.3 * clip(gap_ratio - 1, 0, 2)"""
+      m_due       = 1 + 0.3 * clip(gap_ratio - 1, 0, 2)
+    The long-window floor keeps steady-but-rare rotation songs alive mid-cycle;
+    the w_recent gate removes it beyond 4x median gap so decayed_rate + capped
+    m_due stay the only bust-out mechanism. base >= decayed_rate elementwise."""
 
 def heuristic_predict(df: pd.DataFrame, k: float) -> pd.DataFrame
     """heuristic_scores + `prob` column via probs.renormalize_to_k(score, k).
@@ -282,7 +290,7 @@ def tour_mode(conn, horizon_showids, config: SimConfig | None = None) -> TourRep
 def run_mode(conn, run_showids, config: SimConfig | None = None) -> RunReport      # config default strict_no_repeat=True
 def chaser_mode(conn, song_query: str, horizon_showids, config: SimConfig | None = None) -> ChaserReport
 ```
-- `TourReport.rows: list[TourSongRow(song, slug, expected_plays, p_at_least_one, dist{0/1/2/3+}, bucket, gap_ratio, analytic_p)]`,
+- `TourReport.rows: list[TourSongRow(song, slug, expected_plays, p_at_least_one, dist{0/1/2/3/4+}, bucket, gap_ratio, analytic_p)]`,
   sorted by expected_plays. Buckets: **lock** P(≥1)≥0.9; **likely** ≥0.5; **bustout-watch** P(≥1)<0.5 AND gap_ratio≥2.0; else **longshot**. `analytic_p` = Σ per-show heuristic marginals (labeled over-counting approximation; MC is headline).
 - `RunReport.rows: list[RunSongRow(song, slug, p_at_least_one, per_night_probs, most_likely_night_index, most_likely_night_date)]` — `p_at_least_one` is the true joint union across nights (not a per-night sum).
 - `ChaserReport(song, slug, ..., p_not_within_horizon, modal_show_date, median_show_date, expected_shows_until_next_play, historical_play_count, low_signal_caveat, distribution: list[ChaserShowProb(showid, showdate, probability)])`. "expected_shows_until_next_play" = mean 1-indexed first-hit position over sims that hit (misses excluded, reported separately as `p_not_within_horizon`); `None` if no sim hits. `low_signal_caveat=True` when historical plays < 20.
@@ -295,14 +303,18 @@ def hard_pairings(conn, *, dominance=0.9, min_support=5) -> dict[int, int]      
 @dataclass class SetlistSong: song_name; slug; songid; slot; prob; segue_mark=""       # mark AFTER this song ('', ' > ', ' -> ')
 @dataclass class SetlistPrediction: showdate; venue_name; era; model; skeleton: dict[str,int]; sets: dict[str,list[SetlistSong]]
     def render(self, json_out: bool = False) -> str
-def sample_setlist(conn, showdate, *, half_life=50, seed=0, skeleton=None) -> SetlistPrediction   # deterministic given seed (§6c-i)
-def assemble_setlist_llm(conn, showdate, client, *, half_life=50, n_candidates=40, skeleton=None) -> SetlistPrediction  # §6c-ii; inject llm.LLMClient
+def sample_setlist(conn, showdate, *, half_life=50, seed=0, skeleton=None,
+                   strict_no_repeat=True, exclude_songids=None, discourage_songids=None) -> SetlistPrediction  # deterministic given seed (§6c-i)
+def assemble_setlist_llm(conn, showdate, client, *, half_life=50, n_candidates=40, skeleton=None,
+                         strict_no_repeat=True, exclude_songids=None, discourage_songids=None) -> SetlistPrediction  # §6c-ii; inject llm.LLMClient
 def actual_setlist(conn, showid) -> list[int]                                          # ordered songids by position
 def score_setlist(predicted, actual_ordered_songids) -> dict                           # hit_at_k, jaccard, kendall_tau, lcs_len/ratio, slot_accuracy (§6d)
 def evaluate_sampler(conn, showids, *, seed=0, half_life=50) -> dict                    # LEAKAGE-FREE: build_features once + each show's real skeleton
 SETLIST_SCHEMA   # {"sets": {<label>: [{"slug","segue_mark"}, ...]}}
 ```
 - Sampler fills each skeleton slot without replacement weighted by `P(song) × P(slot|song)` (from `slots`), honoring mined `hard_pairings` (follower force-placed immediately after its predecessor, never without it) and preferring mined segue bigrams for marks.
+- Run-scope no-repeat (mirrors `simulate.SimConfig.strict_no_repeat`): `strict_no_repeat=True` hard-masks candidates whose `played_in_run` feature fires (actual mid-run history); `exclude_songids` hard-masks too (publish passes songids placed in earlier PREDICTED nights of the same run); `discourage_songids` weights by `PREV_NIGHT_DISCOURAGE=0.02` (previous predicted night, different venue). Hard-masked songs are also barred from hard-pair force-placement. Publish derives a per-show seed `zlib.crc32(f"{seed}:{showdate}")` and records it in the setlist doc.
+- LLM run-scope no-repeat (same params, same `PREV_NIGHT_DISCOURAGE` constant): with `strict_no_repeat` (default) `exclude_songids` are masked out of the candidate shortlist before the top-N cut, listed in the user prompt as "already played earlier in this run — do NOT select", and dropped from the response if the LLM selects one anyway; with `strict_no_repeat=False` they are only down-weighted, same as `discourage_songids` (soft-penalized regardless of the flag).
 - `evaluate_sampler` uses leakage-free contemporaneous features from `features.build_features` (sliced per show) and each show's **real** set skeleton — an upper bound on assembly quality given correct structure; the very first show (no prior plays) is correctly unscoreable. NOTE: `sample_setlist(showdate)` on a *genuine future* show is leakage-free via `features_for_future_show`; on an already-indexed *past* date it inherits `features_for_future_show`'s "as-of-latest" behavior (documented follow-up), which is why `evaluate_sampler` bypasses it.
 - CLI: `phishpred setlist <date> [--llm --provider P --model M]`; `--llm` builds `llm.get_client(provider, model)` and calls `assemble_setlist_llm`.
 

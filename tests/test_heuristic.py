@@ -18,6 +18,7 @@ DEFAULTS = {
     "plays_this_tour": 0,
     "plays_last_10": 0,
     "plays_last_50": 0,
+    "plays_last_150": 0,
     "song_age_shows": 100,
     "era_rate": 0.1,
     "is_original": 1,
@@ -124,6 +125,81 @@ def test_m_due_multiplier_formula_and_clipping():
 
 
 # ---------------------------------------------------------------------------
+# Blended base rate: recent-rate floor gated by w_recent
+# ---------------------------------------------------------------------------
+
+def test_steady_rare_song_gets_recent_rate_floor():
+    """A steady-but-rare rotation song (a few plays in the last 150 shows,
+    gap_ratio near 1) whose decayed_rate has sagged to near zero must be scored
+    from the long-window floor, not the sagging decayed_rate."""
+    df = make_df([
+        {"decayed_rate": 0.001, "plays_last_150": 4, "gap_ratio": 1.5},
+    ])
+    result = heuristic_scores(df)
+    row = result.loc[0]
+
+    rate = 4 / 150
+    w = (4.0 - 1.5) / 3.0  # 5/6 — mid-fade, still mostly floored
+    assert row["recent_rate"] == pytest.approx(rate)
+    assert row["w_recent"] == pytest.approx(w)
+    # No multipliers fire except m_due = 1 + 0.3*0.5 = 1.15; base == w * rate.
+    assert row["score"] == pytest.approx(w * rate * 1.15)
+    assert row["score"] > 0.001  # decisively above what decayed_rate alone gives
+
+
+def test_w_recent_fade_boundaries():
+    """w_recent = clip((4 - gap_ratio)/3, 0, 1): full floor while gap_ratio<=1,
+    linear fade, dead at gap_ratio>=4."""
+    df = make_df([
+        {"gap_ratio": 0.5},
+        {"gap_ratio": 1.0},
+        {"gap_ratio": 2.5},
+        {"gap_ratio": 4.0},
+        {"gap_ratio": 10.0},
+    ])
+    result = heuristic_scores(df)
+    assert result.loc[0, "w_recent"] == pytest.approx(1.0)
+    assert result.loc[1, "w_recent"] == pytest.approx(1.0)
+    assert result.loc[2, "w_recent"] == pytest.approx(0.5)
+    assert result.loc[3, "w_recent"] == pytest.approx(0.0)
+    assert result.loc[4, "w_recent"] == pytest.approx(0.0)
+
+
+def test_long_dormant_song_gets_no_floor():
+    """A long-dormant song (gap_ratio >= 4) gets NO floor even with a nonzero
+    long-window play count: base == decayed_rate, so score is exactly
+    decayed_rate * m_due (the capped due boost stays the only bust-out path)."""
+    df = make_df([
+        {"decayed_rate": 0.0004, "plays_last_150": 30, "gap_ratio": 8.0},
+    ])
+    result = heuristic_scores(df)
+    row = result.loc[0]
+    assert row["w_recent"] == pytest.approx(0.0)
+    # m_due clipped at 1.6; base must be decayed_rate, not 30/150.
+    assert row["score"] == pytest.approx(0.0004 * 1.6)
+
+
+def test_blend_never_lowers_score_vs_decayed_rate_alone():
+    """base = max(decayed_rate, w*recent_rate) >= decayed_rate elementwise, so
+    the blended score is never below the pure-decayed_rate score."""
+    rows = []
+    for dr in (0.0, 0.001, 0.05, 0.3):
+        for p150 in (0, 2, 10, 60):
+            for gr in (0.5, 1.0, 2.5, 5.0, 7.0):
+                rows.append({
+                    "decayed_rate": dr, "plays_last_150": p150, "gap_ratio": gr,
+                    "played_prev_show": int(dr > 0.2), "venue_gap": 1 if p150 > 5 else 999,
+                })
+    df = make_df(rows)
+    result = heuristic_scores(df)
+    old_score = (
+        result["decayed_rate"] * result["m_prev_show"] * result["m_in_run"]
+        * result["m_venue"] * result["m_due"]
+    )
+    assert (result["score"] >= old_score - 1e-15).all()
+
+
+# ---------------------------------------------------------------------------
 # Score arithmetic on hand-computed rows
 # ---------------------------------------------------------------------------
 
@@ -173,7 +249,8 @@ def test_score_arithmetic_hand_computed():
 def test_heuristic_scores_returns_new_columns():
     df = make_df([{}])
     result = heuristic_scores(df)
-    for col in ("m_prev_show", "m_in_run", "m_venue", "m_due", "score"):
+    for col in ("recent_rate", "w_recent", "m_prev_show", "m_in_run", "m_venue",
+                "m_due", "score"):
         assert col in result.columns
 
 

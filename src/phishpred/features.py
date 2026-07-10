@@ -25,7 +25,7 @@ ID_COLUMNS = [
 FEATURE_COLUMNS = [
     "decayed_rate", "gap", "gap_ratio", "played_prev_show", "played_in_run",
     "venue_gap", "plays_this_tour", "plays_last_10", "plays_last_50",
-    "song_age_shows", "era_rate", "is_original",
+    "plays_last_150", "song_age_shows", "era_rate", "is_original",
 ]
 
 VENUE_GAP_SENTINEL = 999
@@ -35,6 +35,13 @@ _ALL_COLUMNS = ID_COLUMNS + FEATURE_COLUMNS
 # Windows for plays_last_N.
 _WINDOW_10 = 10
 _WINDOW_50 = 50
+# ~5 years of touring; a long-window empirical-rate floor the heuristic uses to
+# stabilize steady-but-rare rotation songs between plays (imported as
+# RECENT_RATE_WINDOW).
+_WINDOW_150 = 150
+# Public alias so models/heuristic.py can divide plays_last_150 by the window
+# without hardcoding the constant (keeps the recent-rate definition in one place).
+RECENT_RATE_WINDOW = _WINDOW_150
 # Candidate-set thresholds.
 _RECENT_WINDOW = 300
 _BUSTOUT_PLAYS = 20
@@ -203,6 +210,7 @@ class _State:
             pl = self.play_indexes[s]
             plays10 = len(pl) - bisect_left(pl, index - _WINDOW_10)
             plays50 = len(pl) - bisect_left(pl, index - _WINDOW_50)
+            plays150 = len(pl) - bisect_left(pl, index - _WINDOW_150)
 
             age = index - self.first_play[s]
             era_rate = self.era_song_plays.get((era, s), 0) / era_denom
@@ -226,6 +234,7 @@ class _State:
             cols["plays_this_tour"].append(plays_tour)
             cols["plays_last_10"].append(plays10)
             cols["plays_last_50"].append(plays50)
+            cols["plays_last_150"].append(plays150)
             cols["song_age_shows"].append(age)
             cols["era_rate"].append(era_rate)
             cols["is_original"].append(iso)

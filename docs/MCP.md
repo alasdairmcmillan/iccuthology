@@ -46,6 +46,28 @@ Other MCP-capable clients (antigravity, Cline, etc.) work the same way —
 point them at the `phishpred-mcp` command (or `python -m uv run phishpred-mcp`)
 over stdio.
 
+## Ground rules
+
+Phish essentially never repeats a song within a multi-night same-venue run,
+and only rarely repeats the song that closed the immediately previous show.
+The statistical models (`heuristic`, `lr`/`gbm`, the simulator) enforce this
+automatically, but an external agent driving this MCP server has to respect
+it explicitly -- nothing stops you from proposing a jointly-impossible
+setlist across nights. When predicting or submitting, follow these rules:
+
+1. **No repeats within a run.** Before assigning a high probability, check
+   `candidate_features`' `played_in_run` flag (or cross-reference
+   `run_context`'s already-played nights). A song with `played_in_run=1` has
+   effectively ~0-5% probability of repeating that same run.
+2. **Previous-night repeats are rare.** Check `played_prev_show`; a song that
+   closed the immediately preceding show has only ~2% odds of repeating the
+   very next night.
+3. **Multi-night predictions must be jointly consistent.** If you're
+   predicting or submitting for more than one show in the same run, a song
+   you gave a high probability for night 1 should be heavily discounted for
+   nights 2-3 of that run (and vice versa) -- don't independently maximize
+   each night's prediction as if the others didn't exist.
+
 ## Tools
 
 All read tools are leakage-safe: they only ever see history as-of the

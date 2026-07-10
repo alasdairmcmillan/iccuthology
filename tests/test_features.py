@@ -12,6 +12,8 @@ import pytest
 
 from phishpred import db
 from phishpred.features import (
+    FEATURE_COLUMNS,
+    RECENT_RATE_WINDOW,
     build_features,
     features_for_future_show,
     mean_setlist_size,
@@ -239,6 +241,64 @@ def test_plays_this_tour(conn):
     df = build_features(conn, half_life=50)
     # Tour 101 begins at idx5. Tweezer plays in tour 101 before idx8: idx5, idx6.
     assert _row(df, 8, 101)["plays_this_tour"] == 2
+
+
+# --------------------------------------------------------------------------
+# plays_last_150
+# --------------------------------------------------------------------------
+
+def test_plays_last_150_in_feature_columns():
+    assert "plays_last_150" in FEATURE_COLUMNS
+    assert RECENT_RATE_WINDOW == 150
+
+
+def test_plays_last_150_short_history_equals_total_prior_plays(conn):
+    # All 10 shows fit in the 150-window, so the count == total prior plays.
+    # Tweezer prior plays before idx8: 0,2,4,5,6 -> 5.
+    row = _row(build_features(conn, half_life=50), 8, 101)
+    assert row["plays_last_150"] == 5
+    assert row["plays_last_150"] == row["plays_last_50"]
+
+
+def test_plays_last_150_window_counts_constructed_sweep():
+    """>150-show history with a song played at known indexes: the 150-show
+    window must count exactly the plays with index >= t - 150 (and < t)."""
+    target_plays = [0, 10, 40, 60, 100, 155, 180]
+    n_shows = 200
+
+    c = db.get_connection(":memory:")
+    db.init_db(c)
+    c.execute("INSERT INTO venues (venueid, name, alias) VALUES (1,'A',0)")
+    c.execute("INSERT INTO songs (songid, slug, name, is_original) VALUES (900,'rare','Rare',1)")
+    c.execute("INSERT INTO songs (songid, slug, name, is_original) VALUES (901,'staple','Staple',1)")
+    for idx in range(n_shows):
+        showid = 5000 + idx
+        date = f"2015-{1 + idx // 28:02d}-{1 + idx % 28:02d}"
+        c.execute(
+            "INSERT INTO shows (showid, showdate, venueid, tourid, show_index, exclude) "
+            "VALUES (?,?,1,700,?,0)",
+            (showid, date, idx),
+        )
+        picks = [901] + ([900] if idx in target_plays else [])
+        for pos, sid in enumerate(picks):
+            c.execute(
+                "INSERT INTO performances (showid, songid, set_label, position) "
+                "VALUES (?,?,?,?)",
+                (showid, sid, "1", pos),
+            )
+    c.commit()
+    df = build_features(c, half_life=50)
+    c.close()
+
+    def expected(t):
+        return sum(1 for i in target_plays if t - 150 <= i < t)
+
+    # idx 100: window [-50, 100) -> plays 0,10,40,60 -> 4.
+    assert _row(df, 100, 900)["plays_last_150"] == expected(100) == 4
+    # idx 190: window [40, 190) -> plays 40,60,100,155,180 -> 5 (0 and 10 aged out).
+    assert _row(df, 190, 900)["plays_last_150"] == expected(190) == 5
+    # Staple played at every prior show: exactly 150 in-window at idx 190.
+    assert _row(df, 190, 901)["plays_last_150"] == 150
 
 
 # --------------------------------------------------------------------------

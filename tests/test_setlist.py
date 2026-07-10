@@ -16,6 +16,7 @@ import pytest
 from phishpred import db
 from phishpred.models.llm import LLMError
 from phishpred.setlist import (
+    PREV_NIGHT_DISCOURAGE,
     SetlistPrediction,
     SetlistSong,
     actual_setlist,
@@ -30,7 +31,7 @@ from phishpred.setlist import (
 # ---------------------------------------------------------------------------
 # Hand-crafted history
 # ---------------------------------------------------------------------------
-VENUES = [(1, "Venue", 0)]
+VENUES = [(1, "Venue", 0), (2, "Venue B", 0)]
 
 SONGS = {
     1: "opener",
@@ -71,12 +72,19 @@ SPLIT_A_DATES = ["2022-03-15", "2022-03-16", "2022-03-17", "2022-03-18", "2022-0
 SPLIT_B_STRUCT = [(4, "1", " > "), (11, "1", "")]
 SPLIT_B_DATES = ["2022-03-21", "2022-03-22", "2022-03-23", "2022-03-24"]
 
+# Two future shows. RUN_FUTURE continues the all-venue-1 "run" (every indexed
+# show is at venue 1, contiguous in calendar order), so sample_setlist's
+# default strict_no_repeat hard mask fires for EVERY catalog song there.
+# FUTURE is at a fresh venue (2) so it carries no actual-history run context
+# and the general sampler tests are unaffected by the mask.
+RUN_FUTURE_DATE = "2022-03-25"
 FUTURE_DATE = "2022-04-01"
 
 MAIN_SHOWIDS = list(range(1, 1 + len(MAIN_DATES)))
 RARE_SHOWIDS = list(range(100, 100 + len(RARE_DATES)))
 SPLIT_A_SHOWIDS = list(range(200, 200 + len(SPLIT_A_DATES)))
 SPLIT_B_SHOWIDS = list(range(300, 300 + len(SPLIT_B_DATES)))
+RUN_FUTURE_SHOWID = 998
 FUTURE_SHOWID = 999
 
 
@@ -124,11 +132,18 @@ def _populate(conn):
         _insert_perf(conn, showid, SPLIT_B_STRUCT)
         index += 1
 
-    # Future show: no performances, show_index NULL.
+    # Future shows: no performances, show_index NULL. RUN_FUTURE at venue 1
+    # (continues the run formed by the whole venue-1 history); FUTURE at
+    # venue 2 (fresh venue, no run context -- see the constants' comment).
     conn.execute(
         "INSERT INTO shows (showid, showdate, venueid, tourid, show_index, exclude) "
         "VALUES (?,?,?,?,NULL,0)",
-        (FUTURE_SHOWID, FUTURE_DATE, 1, 900),
+        (RUN_FUTURE_SHOWID, RUN_FUTURE_DATE, 1, 900),
+    )
+    conn.execute(
+        "INSERT INTO shows (showid, showdate, venueid, tourid, show_index, exclude) "
+        "VALUES (?,?,?,?,NULL,0)",
+        (FUTURE_SHOWID, FUTURE_DATE, 2, 900),
     )
     conn.commit()
 
@@ -261,6 +276,96 @@ def test_sample_setlist_unknown_date_raises(conn):
 
 
 # ---------------------------------------------------------------------------
+# Run-scope no-repeat semantics (strict mask / exclude / discourage)
+# ---------------------------------------------------------------------------
+def _all_songids(pred: SetlistPrediction) -> set[int]:
+    return {s.songid for songs in pred.sets.values() for s in songs}
+
+
+def test_sample_setlist_strict_no_repeat_masks_actual_run_history(conn):
+    # RUN_FUTURE continues the run formed by the entire venue-1 history, so
+    # every catalog song has played_in_run=1 -> the default hard mask empties
+    # the candidate pool entirely (no repeats within a run, ever).
+    pred = sample_setlist(conn, RUN_FUTURE_DATE, seed=0, skeleton=SKELETON)
+    assert _all_songids(pred) == set()
+
+    # Opting out restores the old soft-downweight-only behavior.
+    relaxed = sample_setlist(
+        conn, RUN_FUTURE_DATE, seed=0, skeleton=SKELETON, strict_no_repeat=False
+    )
+    assert _all_songids(relaxed)
+
+
+def test_sample_setlist_exclude_songids_never_placed(conn):
+    for seed in range(10):
+        pred = sample_setlist(
+            conn, FUTURE_DATE, seed=seed, skeleton=SKELETON, exclude_songids={1, 8}
+        )
+        assert not _all_songids(pred) & {1, 8}
+
+
+def test_sample_setlist_excluded_follower_not_force_placed(conn):
+    # reprise(6) only ever enters via force-placement behind tweezer(5);
+    # excluding it must keep it out even though its predecessor is placed.
+    for seed in range(10):
+        pred = sample_setlist(
+            conn, FUTURE_DATE, seed=seed, skeleton=SKELETON, exclude_songids={6}
+        )
+        all_ids = _all_songids(pred)
+        assert 6 not in all_ids
+        assert 5 in all_ids  # predecessor still drawable on its own
+
+
+def test_sample_setlist_excluding_predecessor_drops_follower_too(conn):
+    # Followers are never drawn directly, so excluding tweezer(5) removes the
+    # reprise(6) as well -- it can't appear without its predecessor before it.
+    for seed in range(10):
+        pred = sample_setlist(
+            conn, FUTURE_DATE, seed=seed, skeleton=SKELETON, exclude_songids={5}
+        )
+        assert not _all_songids(pred) & {5, 6}
+
+
+def test_sample_setlist_discourage_scales_published_prob(conn):
+    base = sample_setlist(conn, FUTURE_DATE, seed=0, skeleton=SKELETON)
+    base_prob = next(s.prob for s in base.sets["e"] if s.songid == 8)
+    assert base_prob > 0
+
+    dis = sample_setlist(
+        conn, FUTURE_DATE, seed=0, skeleton=SKELETON, discourage_songids={8}
+    )
+    # encore-song(8) is the only encore-propensity candidate, so it still wins
+    # the encore slot -- but its weight (and published prob) carries the 0.02
+    # discourage multiplier.
+    dis_prob = next(s.prob for s in dis.sets["e"] if s.songid == 8)
+    assert dis_prob == pytest.approx(PREV_NIGHT_DISCOURAGE * base_prob)
+
+
+def test_sample_setlist_discouraged_song_heavily_underrepresented(conn):
+    # One-slot skeleton: opener(1) has by far the strongest set1-open history
+    # (14 of 20 shows). Discouraging it should collapse its selection rate.
+    skeleton = {"1": 1}
+
+    def freq(discourage: set[int] | None) -> float:
+        n = 100
+        hits = sum(
+            1 in _all_songids(
+                sample_setlist(
+                    conn, FUTURE_DATE, seed=seed, skeleton=skeleton,
+                    discourage_songids=discourage,
+                )
+            )
+            for seed in range(n)
+        )
+        return hits / n
+
+    base = freq(None)
+    dis = freq({1})
+    assert base > 0.2
+    assert dis < base / 4
+
+
+# ---------------------------------------------------------------------------
 # assemble_setlist_llm
 # ---------------------------------------------------------------------------
 class FakeSetlistClient:
@@ -270,9 +375,11 @@ class FakeSetlistClient:
         self.model = model
         self.response = response
         self.calls = 0
+        self.last_user: str | None = None
 
     def complete_json(self, system, user, schema, *, max_tokens=2048):
         self.calls += 1
+        self.last_user = user
         return self.response
 
 
@@ -331,6 +438,72 @@ def test_assemble_setlist_llm_missing_slug_raises(conn):
     client = FakeSetlistClient({"sets": {"1": [{"segue_mark": ""}]}})
     with pytest.raises(LLMError):
         assemble_setlist_llm(conn, FUTURE_DATE, client, skeleton=SKELETON)
+
+
+# ---------------------------------------------------------------------------
+# assemble_setlist_llm -- run-scope no-repeat
+# ---------------------------------------------------------------------------
+def _candidate_lines(prompt: str) -> list[str]:
+    return prompt.splitlines()
+
+
+def _prompt_prob(prompt: str, slug: str) -> float:
+    line = next(l for l in prompt.splitlines() if l.startswith(f"{slug} |"))
+    return float(line.split("prob=")[1].split(" ")[0])
+
+
+def test_assemble_setlist_llm_strict_exclusion_masks_shortlist_and_prompt(conn):
+    client = FakeSetlistClient(dict(CANNED_RESPONSE))
+    pred = assemble_setlist_llm(
+        conn, FUTURE_DATE, client, skeleton=SKELETON,
+        exclude_songids={5},  # tweezer played on an earlier night of the run
+    )
+    lines = _candidate_lines(client.last_user)
+    # tweezer's candidate line is gone; tweezer-reprise (distinct slug) stays.
+    assert not any(l.startswith("tweezer |") for l in lines)
+    assert any(l.startswith("tweezer-reprise |") for l in lines)
+    # The prompt names the exclusion explicitly.
+    assert "already played earlier in this run" in client.last_user.lower()
+    assert "tweezer" in client.last_user
+    # The canned response still emits tweezer -- the resolution guard drops it.
+    all_ids = [s.songid for songs in pred.sets.values() for s in songs]
+    assert 5 not in all_ids
+
+
+def test_assemble_setlist_llm_no_exclusions_no_prompt_line(conn):
+    client = FakeSetlistClient(dict(CANNED_RESPONSE))
+    assemble_setlist_llm(conn, FUTURE_DATE, client, skeleton=SKELETON)
+    assert "already played earlier in this run" not in client.last_user.lower()
+
+
+def test_assemble_setlist_llm_discourage_downweights_prompt_probs(conn):
+    base = FakeSetlistClient(dict(CANNED_RESPONSE))
+    assemble_setlist_llm(conn, FUTURE_DATE, base, skeleton=SKELETON)
+    disc = FakeSetlistClient(dict(CANNED_RESPONSE))
+    pred = assemble_setlist_llm(
+        conn, FUTURE_DATE, disc, skeleton=SKELETON, discourage_songids={4},
+    )
+    p_base = _prompt_prob(base.last_user, "midjam")
+    p_disc = _prompt_prob(disc.last_user, "midjam")
+    assert p_disc == pytest.approx(p_base * PREV_NIGHT_DISCOURAGE, abs=2e-3)
+    # Discouraged, not banned: no "do not select" line, and the LLM's pick
+    # of midjam is still honored.
+    assert "already played earlier in this run" not in disc.last_user.lower()
+    all_ids = [s.songid for songs in pred.sets.values() for s in songs]
+    assert 4 in all_ids
+
+
+def test_assemble_setlist_llm_soft_no_repeat_keeps_excluded_selectable(conn):
+    client = FakeSetlistClient(dict(CANNED_RESPONSE))
+    pred = assemble_setlist_llm(
+        conn, FUTURE_DATE, client, skeleton=SKELETON,
+        strict_no_repeat=False, exclude_songids={5},
+    )
+    # Soft mode: the excluded song stays in the shortlist (down-weighted, not
+    # masked) and the LLM's pick of it is honored.
+    assert any(l.startswith("tweezer |") for l in _candidate_lines(client.last_user))
+    all_ids = [s.songid for songs in pred.sets.values() for s in songs]
+    assert 5 in all_ids
 
 
 # ---------------------------------------------------------------------------

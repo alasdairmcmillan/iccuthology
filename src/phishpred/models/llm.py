@@ -379,7 +379,12 @@ SYSTEM_PROMPT = (
     "invent slugs, do not omit any). prob must be a number in [0, 1]. Use the "
     "target setlist size only as a rough calibration anchor for how many songs "
     "should have meaningfully high probability — do not force probabilities to "
-    "sum exactly to it."
+    "sum exactly to it. Respect the band's rotation rules: a candidate with "
+    "played_in_run=1 has already been played earlier in this same multi-night "
+    "run and gets an effectively ~0-5% probability tonight (within-run repeats "
+    "are essentially unheard of); played_prev_show=1 means it closed the "
+    "immediately preceding show, which is similarly rare (~2%). Never assign "
+    "high probability to both a song and its within-run repeat across nights."
 )
 
 

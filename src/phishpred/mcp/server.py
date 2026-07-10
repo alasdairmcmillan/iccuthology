@@ -63,7 +63,13 @@ def upcoming_shows(limit: int = 50) -> dict[str, Any]:
 
 @mcp.tool()
 def candidate_features(showdate: str, half_life: int = 50, top: int = 50) -> dict[str, Any]:
-    """The candidate feature frame ``predict_show`` builds for a future show."""
+    """The candidate feature frame ``predict_show`` builds for a future show.
+
+    Ground rules: check each row's ``played_in_run`` (already played earlier
+    this run -- essentially never repeats) and ``played_prev_show`` (played
+    the immediately preceding show -- ~2% events) before predicting high
+    probabilities. See docs/MCP.md "Ground rules".
+    """
     return tools.candidate_features(_get_conn(), showdate, half_life=half_life, top=top)
 
 
@@ -87,7 +93,11 @@ def recent_setlists(n: int = 10) -> dict[str, Any]:
 
 @mcp.tool()
 def run_context(showdate: str) -> dict[str, Any]:
-    """The multi-night run a show belongs to, incl. already-played nights."""
+    """The multi-night run a show belongs to, incl. already-played nights.
+
+    Use the already-played nights' setlists to rule out same-run repeats when
+    predicting a later night -- see docs/MCP.md "Ground rules".
+    """
     return tools.run_context(_get_conn(), showdate)
 
 
@@ -114,6 +124,12 @@ def submit_prediction(
     publish batch to fold in as source ``mcp:{model_label}``; at fold time they
     are published as submitted and scaled down only if their sum exceeds the
     show's expected setlist size K.
+
+    Ground rules: don't submit high probabilities for a song already flagged
+    ``played_in_run``/``played_prev_show`` in ``candidate_features``, and if
+    submitting for multiple nights of one run, keep the submissions jointly
+    consistent (discount a song for later nights once it's predicted high for
+    an earlier one) -- see docs/MCP.md "Ground rules".
     """
     return tools.submit_prediction(
         showdate,

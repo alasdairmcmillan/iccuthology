@@ -97,7 +97,7 @@ non-empty and was simulated.
     {
       "song": "Harry Hood", "slug": "harry-hood",
       "expected_plays": 2.34, "p_at_least_one": 0.978,
-      "dist": {"0": 0.02, "1": 0.20, "2": 0.42, "3+": 0.36},
+      "dist": {"0": 0.02, "1": 0.20, "2": 0.42, "3": 0.24, "4+": 0.12},
       "bucket": "lock",                    // lock | likely | bustout-watch | longshot
       "gap_ratio": 1.9, "analytic_p": 2.24
     }
@@ -134,7 +134,7 @@ inbox (§5).
 ```json
 {
   "showdate": "2026-07-10", "venue_name": "Ruoff Music Center",
-  "era": "4.0", "model": "sampler", "seed": 0,
+  "era": "4.0", "model": "sampler", "seed": 1286289815,
   "skeleton": {"1": 8, "2": 7, "e": 2},
   "sets": {
     "1": [{"song_name": "Sample in a Jar", "slug": "sample-in-a-jar",
@@ -144,7 +144,11 @@ inbox (§5).
 }
 ```
 Set labels are the raw `set` keys ("1","2","3","e","e2",...). `segue_mark` is the
-mark AFTER this song ("", " > ", " -> ").
+mark AFTER this song ("", " > ", " -> "). `seed` is the per-show sampler seed
+`zlib.crc32(f"{global_seed}:{showdate}")` — not the global publish seed — so
+consecutive nights draw decorrelated setlists; within a multi-night same-venue
+run, later nights exclude songs placed on earlier nights (predicted or actually
+played), and a previous night at a different venue is discouraged (×0.02).
 
 ### schedule.json  (full future schedule for the UI's schedule sidebar + multiselect)
 ```json
