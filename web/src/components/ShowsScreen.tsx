@@ -8,6 +8,8 @@ import type {
   ShowReport,
 } from "../types";
 import { dateLabel, dateLabelDay, dateLabelShort, pct1 } from "../lib/format";
+import { songPageSize } from "../lib/paging";
+import Pager from "./Pager";
 
 interface ShowsScreenProps {
   meta: Meta;
@@ -85,6 +87,8 @@ export default function ShowsScreen({
   const [setlistNight, setSetlistNight] = useState<string | null>(null);
   const [model, setModel] = useState(meta.headline_model);
   const [run, setRun] = useState<RunReport | null>(null);
+  const [runPage, setRunPage] = useState(0);
+  const [runPageRows] = useState(songPageSize);
   const multiselectRef = useRef<HTMLDivElement | null>(null);
 
   // Dismiss the night picker on outside click or Escape.
@@ -123,7 +127,10 @@ export default function ShowsScreen({
     }
     let cancelled = false;
     postRun(sortedSelected, meta.headline_model).then((r) => {
-      if (!cancelled) setRun(r);
+      if (!cancelled) {
+        setRun(r);
+        setRunPage(0);
+      }
     });
     return () => {
       cancelled = true;
@@ -213,13 +220,21 @@ export default function ShowsScreen({
             <span style={{ textAlign: "right" }}>P(≥1 in run)</span>
             <span style={{ textAlign: "right" }}>Most likely night</span>
           </div>
-          {(run?.rows ?? []).map((r) => (
-            <div className="run-grid-row" key={r.slug}>
-              <span className="r-song">{r.song}</span>
-              <span className="run-p">{pct1(r.p_at_least_one)}</span>
-              <span className="run-night">{dateLabelDay(r.most_likely_night_date)}</span>
-            </div>
-          ))}
+          {(run?.rows ?? [])
+            .slice(runPage * runPageRows, (runPage + 1) * runPageRows)
+            .map((r) => (
+              <div className="run-grid-row" key={r.slug}>
+                <span className="r-song">{r.song}</span>
+                <span className="run-p">{pct1(r.p_at_least_one)}</span>
+                <span className="run-night">{dateLabelDay(r.most_likely_night_date)}</span>
+              </div>
+            ))}
+          <Pager
+            page={runPage}
+            totalRows={run?.rows.length ?? 0}
+            pageSize={runPageRows}
+            onPage={setRunPage}
+          />
           {run && run.missing.length > 0 && (
             <div className="note">
               No cached predictions yet for: {run.missing.join(", ")}

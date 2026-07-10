@@ -25,6 +25,7 @@ interface HeaderProps {
 const TABS: { id: Screen; label: string }[] = [
   { id: "tours", label: "Tours" },
   { id: "shows", label: "Shows" },
+  { id: "personal", label: "Personal" },
   { id: "about", label: "About" },
 ];
 

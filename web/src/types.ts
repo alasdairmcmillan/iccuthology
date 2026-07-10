@@ -105,6 +105,44 @@ export interface SetlistPrediction {
   sets: Record<string, SetlistSong[]>;
 }
 
+// GET /api/catalog -> catalog.json  (DEPLOY-CONTRACTS.md §2a, --with-catalog)
+export interface CatalogSong {
+  songid: number;
+  slug: string;
+  name: string;
+  plays: number;
+  last: string | null;
+}
+export interface Catalog {
+  epoch: string;
+  /** sorted by plays desc — the "due to see" ranking axis */
+  songs: CatalogSong[];
+  /** each PAST showdate -> songids played */
+  by_show: Record<string, number[]>;
+}
+
+// GET /api/samples-meta -> samples_meta.json  (DEPLOY-CONTRACTS.md §2)
+export interface SamplesVocabEntry {
+  i: number;
+  songid: number;
+  slug: string;
+  name: string;
+}
+export interface SamplesMeta {
+  epoch: string;
+  n_sims: number;
+  seed: number;
+  horizon_showdates: string[];
+  horizon_showids?: number[];
+  vocab: SamplesVocabEntry[];
+}
+
+// GET /api/seedfile/{user} -> proxied + parsed phish.net seedfile
+export interface Seedfile {
+  user: string;
+  dates: string[];
+}
+
 // POST /api/run -> run reduction
 export interface RunRow {
   song: string;

@@ -17,10 +17,11 @@ import type {
 import Header, { type SearchResult } from "./components/Header";
 import ToursScreen from "./components/ToursScreen";
 import ShowsScreen from "./components/ShowsScreen";
+import PersonalScreen from "./components/PersonalScreen";
 import AboutScreen from "./components/AboutScreen";
 import { dateLabelDay, pct } from "./lib/format";
 
-export type Screen = "tours" | "shows" | "about";
+export type Screen = "tours" | "shows" | "personal" | "about";
 
 function todayIso(): string {
   const d = new Date();
@@ -38,7 +39,7 @@ function defaultNight(schedule: Schedule): string | null {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("shows");
+  const [screen, setScreen] = useState<Screen>("tours");
   const [meta, setMeta] = useState<Meta | null>(null);
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [tour, setTour] = useState<TourReport | null>(null);
@@ -158,6 +159,7 @@ export default function App() {
             onChangeSelected={setSelectedShows}
           />
         )}
+        {loaded && screen === "personal" && <PersonalScreen schedule={schedule} />}
         {loaded && screen === "about" && <AboutScreen />}
         {loaded && offline && (
           <div className="fixtures-banner" style={{ marginTop: 32 }}>
