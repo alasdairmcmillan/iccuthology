@@ -100,7 +100,11 @@ def conn():
 # ---------------------------------------------------------------------------
 
 def test_upcoming_shows_returns_future_shows_and_epoch_key(conn):
-    result = tools.upcoming_shows(conn)
+    from unittest.mock import patch
+    import datetime
+    with patch("phishpred.predict.date") as mock_date:
+        mock_date.today.return_value = datetime.date(2026, 7, 9)
+        result = tools.upcoming_shows(conn)
     dates = [s["showdate"] for s in result["shows"]]
     assert "2026-07-09" in dates
     assert "2026-07-10" in dates

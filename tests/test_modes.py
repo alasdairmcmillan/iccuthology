@@ -7,6 +7,8 @@ n_sims and seed for determinism.
 from __future__ import annotations
 
 import json
+from datetime import date
+from unittest.mock import patch
 
 import pytest
 
@@ -145,14 +147,20 @@ SMALL_CONFIG = SimConfig(n_sims=300, seed=123, model="heuristic")
 # ---------------------------------------------------------------------------
 
 def test_resolve_tour_horizon_default_is_rest_of_current_year(conn):
-    # "today" is mocked indirectly via the fixed 2026 future dates + the real
-    # system clock, which is fixed at 2026-07-09 in this environment.
-    assert resolve_tour_horizon(conn) == DEFAULT_HORIZON
+    # Freeze "today" to 2026-07-09 -- DEFAULT_HORIZON's fixture shows are all
+    # dated 2026 (show 1108 is deliberately 2027 to prove the year filter
+    # works), so this would silently break once the real clock rolls into
+    # 2027 otherwise. Same pattern as tests/test_mcp.py's upcoming_shows fix.
+    with patch("phishpred.modes.date") as mock_date:
+        mock_date.today.return_value = date(2026, 7, 9)
+        assert resolve_tour_horizon(conn) == DEFAULT_HORIZON
 
 
 def test_resolve_tour_horizon_matches_future_show_ids_order(conn):
-    full_order = features.future_show_ids(conn)
-    horizon = resolve_tour_horizon(conn)
+    with patch("phishpred.modes.date") as mock_date:
+        mock_date.today.return_value = date(2026, 7, 9)
+        full_order = features.future_show_ids(conn)
+        horizon = resolve_tour_horizon(conn)
     # Subsequence check: the horizon preserves future_show_ids' relative order.
     positions = [full_order.index(sid) for sid in horizon]
     assert positions == sorted(positions)
