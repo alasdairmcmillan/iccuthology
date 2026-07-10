@@ -201,15 +201,15 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
           </div>
           <div className="personal-grid personal-grid-head">
             <span>Song</span>
-            <span style={{ textAlign: "right" }}>Career plays</span>
             <span style={{ textAlign: "right" }}>Last played</span>
             <span style={{ textAlign: "right" }}>P(finally see it)</span>
             <span style={{ textAlign: "right" }}>Most likely show</span>
           </div>
           {report.rows.slice(page * pageRows, (page + 1) * pageRows).map((r) => (
             <div className="personal-grid personal-grid-row" key={r.songid}>
-              <span className="r-song">{r.song}</span>
-              <span className="mono personal-dim">{r.plays}</span>
+              <span className="r-song">
+                {r.song} <span className="personal-plays-inline">({r.plays})</span>
+              </span>
               <span className="mono personal-dim">{r.last ?? "-"}</span>
               <span className="run-p">{(r.pSee * 100).toFixed(1)}%</span>
               <span
