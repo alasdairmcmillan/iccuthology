@@ -102,6 +102,9 @@ a:hover {
 .tabs {
   display: flex;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
 }
 .tab {
   cursor: pointer;
@@ -1139,6 +1142,12 @@ a:hover {
     order: 3;
     width: 100%;
   }
+  /* Tabs shrink to fit narrow phones; overflow-x above is the fallback
+     if a label ever still doesn't fit. */
+  .tab {
+    padding: 7px 12px;
+    font-size: 12px;
+  }
   .search-results {
     width: 100%;
   }
@@ -1184,6 +1193,12 @@ a:hover {
 /* Mobile tour table: no sideways scroll — drop P(≥1) and Dist, keep
    Song | Plays | bucket chip, and let Song flex/wrap to fit. */
 @media (max-width: 640px) {
+  /* The 320px floor above exists so mid-width viewports scroll sideways
+     instead of crushing columns, but the collapsed 3-column layout below
+     needs no such floor — drop it or the card overflows narrow phones. */
+  .tour-table-card {
+    min-width: 0;
+  }
   .tour-grid-head span:nth-child(3),
   .tour-grid-head span:nth-child(5),
   .tour-grid-row .r-p,
@@ -1208,5 +1223,16 @@ a:hover {
 @media (max-width: 640px) {
   .when-narrow {
     display: inline;
+  }
+}
+
+/* Mobile scorecard: the 320px floor above keeps .shows-card from being
+   crushed in the flex-wrap .shows-row at mid widths, but on narrow phones
+   it just pushes the card past the viewport. Drop it here — the run-grid's
+   own 460px floor still forces the intended sideways scroll inside the
+   card via .shows-card's overflow-x: auto. */
+@media (max-width: 640px) {
+  .shows-card {
+    min-width: 0;
   }
 }
