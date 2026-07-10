@@ -7,10 +7,15 @@ compatibility_flags = ["nodejs_compat"]
 # table. `custom_domain` routes take a bare hostname (no /* path pattern) and
 # auto-create the DNS record + cert on the zone.
 account_id = "1130329d2224c95ef8e9feb8b438f47c"
-routes = [
-  { pattern = "iccuthology.com", custom_domain = true },
-  { pattern = "www.iccuthology.com", custom_domain = true },
-]
+# TODO: iccuthology.com is not registered yet (RDAP 404, 2026-07-10) — routes
+# can't attach until the zone is active. Serving on workers.dev meanwhile;
+# once the domain is registered + the zone is Active, delete `workers_dev`,
+# uncomment `routes`, and redeploy.
+workers_dev = true
+# routes = [
+#   { pattern = "iccuthology.com", custom_domain = true },
+#   { pattern = "www.iccuthology.com", custom_domain = true },
+# ]
 
 # --- Static assets: the built React app (see ../web) -----------------------
 # Build the frontend first (`npm run build` in ../web`) so `../web/dist`
