@@ -26,9 +26,11 @@ interface ModelOption {
 // Model picker options are derived from the source keys actually present on the
 // loaded shows — never hardcoded. Order: meta.headline_model first, then
 // meta.models in their declared order, then any remaining keys (e.g. mcp:*/llm:*
-// entries not yet listed in meta.models) alphabetically. hasData is derived from
-// meta.models, so only sources actually published render a setlist; others show
-// a "no predictions yet" note.
+// entries not yet listed in meta.models) alphabetically. Models in meta.models
+// render the published structured setlist; any other source key (mcp:*/llm:*
+// folded into show/{date}.json) renders its ranked per-song shortlist plus
+// rationale. Only a source absent from the night entirely shows the
+// "no predictions yet" note.
 function deriveModelOptions(
   meta: Meta,
   showsByDate: Record<string, ShowReport>,
@@ -147,9 +149,14 @@ export default function ShowsScreen({
       ? dateLabelShort(sortedSelected[0])
       : `${sortedSelected.length} nights selected`;
 
-  const modelHasData = meta.models.includes(model);
+  // Models in meta.models have a published structured setlist; other sources
+  // (mcp:*/llm:*) carry a flat ranked shortlist inside the night's show JSON.
+  const modelHasSetlist = meta.models.includes(model);
   const modelLabel = modelOptions.find((m) => m.id === model)?.label ?? model;
   const setlist = activeNight ? setlistsByDate[activeNight] : null;
+  const sourceForNight = activeNight
+    ? showsByDate[activeNight]?.sources[model] ?? null
+    : null;
 
   return (
     <>
@@ -262,11 +269,11 @@ export default function ShowsScreen({
             </div>
           </div>
 
-          {!modelHasData ? (
+          {!modelHasSetlist && !sourceForNight ? (
             <div className="center-msg">
-              No published predictions yet for {modelLabel} in this preview.
+              No published predictions yet for {modelLabel} on this night.
             </div>
-          ) : !setlist ? (
+          ) : modelHasSetlist && !setlist ? (
             <div className="center-msg">
               No cached predictions for the selected night(s) yet.
             </div>
@@ -279,25 +286,41 @@ export default function ShowsScreen({
                 className="mono"
                 style={{ color: "var(--text-muted)", fontSize: 11, margin: "2px 0 14px" }}
               >
-                {setlist.venue_name}
+                {modelHasSetlist ? setlist!.venue_name : showsByDate[activeNight!].venue_name}
                 {showsByDate[activeNight!] &&
                   ` · ${showsByDate[activeNight!].city}, ${showsByDate[activeNight!].state}`}
               </div>
-              {orderSetKeys(Object.keys(setlist.sets)).map((key) => (
-                <div className="set-section" key={key}>
-                  <div className="set-label">{setKeyLabel(key)}</div>
-                  {setlist.sets[key].map((sg, i) => (
-                    <div className="set-song" key={sg.slug + i}>
+              {modelHasSetlist ? (
+                orderSetKeys(Object.keys(setlist!.sets)).map((key) => (
+                  <div className="set-section" key={key}>
+                    <div className="set-label">{setKeyLabel(key)}</div>
+                    {setlist!.sets[key].map((sg, i) => (
+                      <div className="set-song" key={sg.slug + i}>
+                        <span className="set-idx">{i + 1}</span>
+                        <span className="set-name">{sg.song_name}</span>
+                        {sg.segue_mark.trim() && (
+                          <span className="set-segue">{sg.segue_mark.trim()}</span>
+                        )}
+                        <span className="set-pct">{pct1(sg.prob)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))
+              ) : (
+                <div className="set-section">
+                  <div className="set-label">Predicted songs · P(played)</div>
+                  {sourceForNight!.rows.map((r, i) => (
+                    <div className="set-song" key={r.slug}>
                       <span className="set-idx">{i + 1}</span>
-                      <span className="set-name">{sg.song_name}</span>
-                      {sg.segue_mark.trim() && (
-                        <span className="set-segue">{sg.segue_mark.trim()}</span>
-                      )}
-                      <span className="set-pct">{pct1(sg.prob)}</span>
+                      <span className="set-name">{r.song}</span>
+                      <span className="set-pct">{pct1(r.prob)}</span>
                     </div>
                   ))}
+                  {sourceForNight!.rationale && (
+                    <div className="note">{sourceForNight!.rationale}</div>
+                  )}
                 </div>
-              ))}
+              )}
             </div>
           )}
         </div>
