@@ -11,6 +11,25 @@ import Pager from "./Pager";
 const MIN_PLAYS = 20;
 const TOP = 100;
 
+// Remember the last phish.net username that produced a report, so returning
+// visitors don't retype it. localStorage can throw (private browsing, blocked
+// storage) — treat it as best-effort.
+const USERNAME_KEY = "phishnet-username";
+function loadSavedUsername(): string {
+  try {
+    return window.localStorage.getItem(USERNAME_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+function saveUsername(name: string) {
+  try {
+    window.localStorage.setItem(USERNAME_KEY, name);
+  } catch {
+    /* best-effort */
+  }
+}
+
 interface PersonalRow {
   songid: number;
   song: string;
@@ -54,7 +73,7 @@ interface PersonalScreenProps {
 }
 
 export default function PersonalScreen({ schedule }: PersonalScreenProps) {
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState(loadSavedUsername);
   const [pasted, setPasted] = useState("");
   const [pasteOpen, setPasteOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -75,12 +94,15 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
     setLoading(true);
     setError(null);
     try {
-      const dates = pasteOpen && pasted.trim()
-        ? parsePastedDates(pasted)
-        : (await fetchSeedfile(username.trim())).dates;
+      const usingUsername = !(pasteOpen && pasted.trim());
+      const dates = usingUsername
+        ? (await fetchSeedfile(username.trim())).dates
+        : parsePastedDates(pasted);
       if (dates.length === 0) {
         throw new Error("no showdates found — check the username or pasted dates");
       }
+      // Only persist a username that actually resolved to showdates.
+      if (usingUsername) saveUsername(username.trim());
 
       const [catalog, samples] = await Promise.all([fetchCatalog(), fetchSamples()]);
 
