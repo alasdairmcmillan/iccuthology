@@ -13,6 +13,8 @@ import type {
   RunReport,
   SamplesMeta,
   Schedule,
+  Scoreboard,
+  Scorecard,
   Seedfile,
   SetlistPrediction,
   ShowReport,
@@ -26,6 +28,7 @@ import {
   genShows,
   genTour,
 } from "./fixtures/generated";
+import { genScoreboard, genScorecards } from "./fixtures/scorecards";
 import { computeRunFromShows } from "./lib/run";
 
 const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
@@ -84,6 +87,21 @@ export function fetchShow(showdate: string): Promise<ShowReport> {
 
 export function fetchSetlist(showdate: string): Promise<SetlistPrediction | null> {
   return getJson(`/api/setlist/${showdate}`, () => genSetlists[showdate] ?? null);
+}
+
+// Accuracy scorecards (DEPLOY-CONTRACTS §8) — past-prediction scoring, NOT
+// epoch-scoped. Same getJson(path, fixture) pattern as the epoch artifacts so
+// past mode is fully developable offline.
+export function fetchScoreboard(): Promise<Scoreboard> {
+  return getJson("/api/scoreboard", () => genScoreboard);
+}
+
+export function fetchScorecard(showdate: string): Promise<Scorecard> {
+  return getJson(`/api/scorecard/${showdate}`, () => {
+    const s = genScorecards[showdate];
+    if (!s) throw new Error(`no fixture scorecard for ${showdate}`);
+    return s;
+  });
 }
 
 // ---------------------------------------------------------------------------

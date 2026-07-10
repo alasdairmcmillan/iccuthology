@@ -186,6 +186,36 @@ async function apiLatest(env: Env): Promise<Response> {
   return jsonResponse(meta);
 }
 
+/** `{showdate}` path segments must look like YYYY-MM-DD; matches apiSeedfile's 400 style. */
+const SHOWDATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * GET /api/scoreboard -> scorecards/scoreboard.json (DEPLOY-CONTRACTS.md §8).
+ * Epoch-INDEPENDENT: `scorecards/` lives outside `snapshots/{epoch}/`, so this
+ * does not consult `latest.json`/resolveEpoch at all.
+ */
+async function apiScoreboard(env: Env): Promise<Response> {
+  const data = await getJson<unknown>(env, "scorecards/scoreboard.json");
+  if (data === null) return notFound("no scoreboard published yet");
+  return jsonResponse(data);
+}
+
+/**
+ * GET /api/scorecard/{showdate} -> scorecards/{showdate}.json (DEPLOY-CONTRACTS.md
+ * §8). Epoch-INDEPENDENT, same as apiScoreboard.
+ */
+async function apiScorecard(env: Env, showdate: string): Promise<Response> {
+  if (!SHOWDATE_RE.test(showdate)) {
+    return jsonResponse(
+      { error: "bad_request", message: `invalid showdate ${JSON.stringify(showdate)}` },
+      { status: 400, cache: false },
+    );
+  }
+  const data = await getJson<unknown>(env, `scorecards/${showdate}.json`);
+  if (data === null) return notFound(`no scorecard for ${showdate}`);
+  return jsonResponse(data);
+}
+
 /** GET /api/schedule, /api/tour, /api/show/{showdate}, /api/setlist/{showdate}, /api/samples-meta */
 async function apiSnapshotJson(env: Env, relPath: string): Promise<Response> {
   const epoch = await requireEpoch(env);
@@ -346,6 +376,7 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   const method = request.method;
 
   if (method === "GET" && pathname === "/api/latest") return apiLatest(env);
+  if (method === "GET" && pathname === "/api/scoreboard") return apiScoreboard(env);
   if (method === "GET" && pathname === "/api/schedule") return apiSnapshotJson(env, "schedule.json");
   if (method === "GET" && pathname === "/api/tour") return apiSnapshotJson(env, "tour.json");
   if (method === "GET" && pathname === "/api/samples") return apiSamplesBin(env);
@@ -368,6 +399,9 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   }
   if (method === "GET" && (m = pathname.match(/^\/api\/seedfile\/([^/]+)$/))) {
     return apiSeedfile(decodeURIComponent(m[1]));
+  }
+  if (method === "GET" && (m = pathname.match(/^\/api\/scorecard\/([^/]+)$/))) {
+    return apiScorecard(env, decodeURIComponent(m[1]));
   }
 
   return jsonResponse(

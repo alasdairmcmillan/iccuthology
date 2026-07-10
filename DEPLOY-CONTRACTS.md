@@ -296,6 +296,8 @@ may be `no-store` or short). CORS: `Access-Control-Allow-Origin: *` (public data
 
 ```
 GET  /api/latest                     -> meta.json (current epoch)
+GET  /api/scoreboard                 -> scorecards/scoreboard.json (§8; NOT epoch-scoped)
+GET  /api/scorecard/{showdate}       -> scorecards/{showdate}.json (§8; NOT epoch-scoped)
 GET  /api/schedule                   -> schedule.json
 GET  /api/tour                       -> tour.json (all future shows)
 GET  /api/tour/{tour_id}             -> tour/{tour_id}.json (one tour)
@@ -339,3 +341,97 @@ defaults to "" (same origin) in prod; a dev fallback may serve bundled sample
 fixtures matching the shapes above. Show multiselect → `POST /api/run` (exact joint
 reduction), NOT the mock's `1-Π(1-p)`. Tours table ← `/api/tour`; per-show ←
 `/api/show/{showdate}`; setlist ← `/api/setlist/{showdate}`.
+
+---
+
+## 8. Accuracy scorecards (frozen predictions → post-show scoring)
+
+Past-prediction accuracy for shows we published predictions for. Two
+epoch-INDEPENDENT R2 prefixes (append-only; never under `snapshots/{epoch}/`):
+
+```
+frozen/show/{showdate}.json      # the FROZEN pre-show prediction (§2 show shape, all sources)
+scorecards/{showdate}.json       # per-show scorecard, written once the show is played
+scorecards/scoreboard.json       # rolling index + per-model aggregates
+```
+
+**Freeze rule.** Every publish run pushes `build/snapshots/show/` →
+`frozen/show/` (overwrite). The horizon only contains future shows, so once a
+show is played it drops out of publish and its frozen file stops changing —
+the last pre-play publish IS the frozen prediction. A scorecard may only ever
+be computed from `frozen/show/{showdate}.json`, never from a current-epoch
+artifact. The frozen file's own `epoch` field records provenance. Shows played
+before `frozen/` existed have no frozen file and are simply unscoreable.
+
+**Scoring.** `phishpred score --frozen DIR --out DIR [--rescore-days 7]`
+(new `src/phishpred/score.py`). For each `frozen/show/{showdate}.json` whose
+show is indexed in the DB (played, `show_index IS NOT NULL`) and
+`showdate < UTC today`: compute the scorecard and write
+`{out}/{showdate}.json`. If a scorecard already exists it is skipped, UNLESS
+`showdate >= UTC today - rescore_days` — inside that window scoring is
+idempotent-rewrite, so late setlist corrections and partially-ingested
+west-coast shows self-heal on the next run. Afterwards ALWAYS rebuild
+`{out}/scoreboard.json` from every scorecard present (empty shows/models
+lists are valid). The played set is the show's DISTINCT performed slugs.
+
+### scorecards/{showdate}.json
+```json
+{
+  "showdate": "2026-07-10",
+  "venue_name": "Ruoff Music Center", "city": "Noblesville", "state": "IN",
+  "frozen_epoch": "228c7eb3a0e9",
+  "scored_at": "2026-07-11T06:10:00Z",
+  "phishnet_url": "https://phish.net/setlists/?d=2026-07-10",
+  "n_played": 21,
+  "played": [{"slug": "harry-hood", "song": "Harry Hood"}],   // distinct, setlist order
+  "sources": {
+    "heuristic": {
+      "model": "heuristic", "kind": "statistical", "n_rows": 40,
+      "metrics": {
+        "hits_top10": 6,          // hits among the first min(10, n_rows) rows (rows are prob desc)
+        "hit_rate_top10": 0.6,    // hits_top10 / min(10, n_rows)
+        "recall": 0.4286,         // |played ∩ shortlist| / n_played
+        "brier": 0.081,           // mean over rows of (prob - hit)^2
+        "log_loss": 0.31          // mean over rows of -(y·ln p + (1-y)·ln(1-p)), p clamped to [0.001, 0.999]
+      },
+      "best_call": {"song": "...", "slug": "...", "prob": 0.12},     // hit with the LOWEST prob; null if no hits
+      "biggest_whiff": {"song": "...", "slug": "...", "prob": 0.61}, // miss with the HIGHEST prob; null if no misses
+      "rows": [{"song": "...", "slug": "...", "prob": 0.61, "hit": true}]  // frozen rows, prob desc
+    }
+    // "mcp:claude-fable", "mcp:gemini-3.5-flash-high", ...: same shape; mcp
+    // sources keep their frozen "rationale"/"submitted_at" fields verbatim.
+  },
+  "missed_by_all": [{"slug": "...", "song": "..."}]  // played songs in NO source's shortlist
+}
+```
+Metrics are computed over each source's own shortlist rows only — shortlists
+differ in length across sources (`n_rows` is published so the UI can caveat).
+The scorecard embeds everything the UI needs; readers never re-fetch frozen
+artifacts. Boundary: this tier stores OUR predictions and a flat played-song
+list for hit/miss context — full setlists (sets, segues, jamcharts) remain
+phish.net's domain; `phishnet_url` links out.
+
+### scorecards/scoreboard.json
+```json
+{
+  "updated_at": "2026-07-11T06:10:00Z",
+  "shows": [                                 // every scored show, showdate DESC
+    {"showdate": "2026-07-10", "venue_name": "Ruoff Music Center",
+     "city": "Noblesville", "state": "IN", "n_played": 21,
+     "source_keys": ["heuristic", "mcp:claude-fable"]}
+  ],
+  "models": {                                // unweighted means over scored shows
+    "heuristic": {"kind": "statistical", "n_shows": 3, "hit_rate_top10": 0.55,
+                  "recall": 0.41, "brier": 0.09, "log_loss": 0.29}
+  }
+}
+```
+
+**Workflow wiring** (`.github/workflows/publish.yml`): the restore step also
+pulls `frozen/` → `data/frozen/` and `scorecards/` → `data/scorecards/`; after
+a gated publish, run `phishpred score --frozen data/frozen/show --out
+data/scorecards`, push `data/scorecards` → `scorecards`, and push
+`build/snapshots/show` → `frozen/show`. All gated on `changed == 'true'` —
+ingesting a played setlist always changes the epoch, so scoring never misses.
+
+---

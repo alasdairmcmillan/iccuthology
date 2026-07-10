@@ -201,13 +201,19 @@ export default function ToursScreen({
                 return (
                   <div className="tour-grid-row" key={r.slug}>
                     <span className="r-song">{r.song}</span>
+                    <span className="r-num">
+                      {ml.label}
+                      <span className="when-wide"> · {Math.round(ml.prob * 100)}%</span>
+                    </span>
+                    <span className="r-p">{pct1(r.p_at_least_one)}</span>
                     <StatPopover
-                      triggerClassName="r-num"
                       trigger={
-                        <>
-                          {ml.label}
-                          <span className="when-wide"> · {Math.round(ml.prob * 100)}%</span>
-                        </>
+                        <span
+                          className="badge"
+                          style={{ background: bc.bg, color: bc.fg, border: `1px solid ${bc.border}` }}
+                        >
+                          {r.bucket}
+                        </span>
                       }
                     >
                       <div className="stat-pop-line">
@@ -227,13 +233,6 @@ export default function ToursScreen({
                         ))}
                       </ul>
                     </StatPopover>
-                    <span className="r-p">{pct1(r.p_at_least_one)}</span>
-                    <span
-                      className="badge"
-                      style={{ background: bc.bg, color: bc.fg, border: `1px solid ${bc.border}` }}
-                    >
-                      {r.bucket}
-                    </span>
                     <span className="r-dist">{dist}</span>
                   </div>
                 );
