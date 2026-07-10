@@ -473,6 +473,17 @@ def refresh(conn: sqlite3.Connection, client: PhishNetClient) -> IngestStats:
     years_to_pull = {today.year}
 
     row = conn.execute("SELECT value FROM meta WHERE key = 'last_refresh'").fetchone()
+    indexed_shows = conn.execute(
+        "SELECT COUNT(*) FROM shows WHERE show_index IS NOT NULL"
+    ).fetchone()[0]
+    if row is None or not row["value"] or indexed_shows == 0:
+        logger.info(
+            "refresh: fresh or empty database detected (last_refresh=%s, "
+            "indexed shows=%d) -- falling back to full ingest 1983..%d",
+            row["value"] if row is not None else None, indexed_shows, today.year,
+        )
+        return full_ingest(conn, client)
+
     if row is not None and row["value"]:
         last_refresh_date: datetime.date | None
         try:
