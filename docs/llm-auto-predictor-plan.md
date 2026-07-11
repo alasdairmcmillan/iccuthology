@@ -1,6 +1,9 @@
 # LLM auto-predictor — hands-off post-show re-prediction (plan)
 
-Status: SPEC — not yet implemented. Written 2026-07-11, alongside the
+Status: SPEC — not yet implemented; implementation intentionally ON HOLD
+(owner's call, 2026-07-11) — do not build without an explicit go-ahead.
+API keys are already wired up as GitHub Actions secrets (2026-07-11), so
+the "Secrets" step below is DONE. Written alongside the
 model-setlists-and-versions branch (submission versioning + setlist benchmark,
 DEPLOY-CONTRACTS §2/§5/§8). Depends on that branch being merged.
 

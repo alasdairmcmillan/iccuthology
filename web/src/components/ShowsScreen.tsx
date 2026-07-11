@@ -333,10 +333,51 @@ export default function ShowsScreen({
 
   return (
     <>
-      {/* Mode toggle — future predictions (default) vs. past scorecards (§8).
-          Right-aligned at desktop widths, stacked top-left (today's behavior)
-          on narrow/mobile widths — see .shows-toolbar in styles.css. */}
+      {/* Toolbar band: the "Build your run" block (upcoming mode) shares a row
+          with the mode toggle so the toggle doesn't strand a mostly-empty band
+          above the content. Mobile stacks them, toggle first — see
+          .shows-toolbar in styles.css. */}
       <div className="shows-toolbar">
+        {mode === "upcoming" && (
+          <div>
+            <div className="label-caps" style={{ marginBottom: 8 }}>
+              Build your run:
+            </div>
+            <div className="multiselect" ref={multiselectRef}>
+              <button className="multiselect-toggle" onClick={() => setDropdownOpen((o) => !o)}>
+                <span className="multiselect-summary">{summary}</span>
+                <span style={{ color: "var(--text-label)", fontSize: 11 }}>
+                  {dropdownOpen ? "▴" : "▾"}
+                </span>
+              </button>
+              {dropdownOpen && (
+                <div className="multiselect-panel">
+                  {schedule.shows.map((s) => {
+                    const checked = selectedShows.includes(s.showdate);
+                    return (
+                      <button
+                        key={s.showdate}
+                        className={"ms-option" + (checked ? " checked" : "")}
+                        onClick={() => toggleShow(s.showdate)}
+                      >
+                        <span className="ms-check" />
+                        <span style={{ flex: 1 }}>
+                          <span className="ms-date" style={{ display: "block" }}>
+                            {dateLabel(s.showdate)}
+                          </span>
+                          <span className="ms-venue">
+                            {s.venue_name} — {s.city}, {s.state}
+                          </span>
+                        </span>
+                        {!s.has_data && <span className="ms-nodata">no data</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         <div className="mode-toggle" role="tablist" aria-label="Prediction mode">
           <button
             className={"mode-option" + (mode === "upcoming" ? " active" : "")}
@@ -359,44 +400,6 @@ export default function ShowsScreen({
 
       {mode === "upcoming" && (
       <>
-      <div style={{ marginBottom: 26 }}>
-        <div className="label-caps" style={{ marginBottom: 8 }}>
-          Build your run:
-        </div>
-        <div className="multiselect" ref={multiselectRef}>
-          <button className="multiselect-toggle" onClick={() => setDropdownOpen((o) => !o)}>
-            <span className="multiselect-summary">{summary}</span>
-            <span style={{ color: "var(--text-label)", fontSize: 11 }}>
-              {dropdownOpen ? "▴" : "▾"}
-            </span>
-          </button>
-          {dropdownOpen && (
-            <div className="multiselect-panel">
-              {schedule.shows.map((s) => {
-                const checked = selectedShows.includes(s.showdate);
-                return (
-                  <button
-                    key={s.showdate}
-                    className={"ms-option" + (checked ? " checked" : "")}
-                    onClick={() => toggleShow(s.showdate)}
-                  >
-                    <span className="ms-check" />
-                    <span style={{ flex: 1 }}>
-                      <span className="ms-date" style={{ display: "block" }}>
-                        {dateLabel(s.showdate)}
-                      </span>
-                      <span className="ms-venue">
-                        {s.venue_name} — {s.city}, {s.state}
-                      </span>
-                    </span>
-                    {!s.has_data && <span className="ms-nodata">no data</span>}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
 
       <div className="shows-row">
         {/* CARD A: RUN VIEW */}

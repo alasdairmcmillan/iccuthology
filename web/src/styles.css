@@ -765,13 +765,18 @@ a:hover {
 }
 
 /* --- Mode toggle (Shows: Upcoming vs Past scorecards) -------------------- */
-/* Toolbar row around the toggle — right-aligned at desktop widths so it
-   sits top-right of the page content; the "Small screens" breakpoint below
-   (max-width: 720px) puts it back to a stacked top-left row. */
+/* Toolbar band shared by the "Build your run" block (upcoming mode) and the
+   mode toggle, so the toggle's row carries content instead of dead space.
+   The toggle hugs the right edge; the "Small screens" breakpoint below
+   (max-width: 720px) stacks them, toggle first. */
 .shows-toolbar {
   display: flex;
-  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 16px;
   margin-bottom: 24px;
+}
+.shows-toolbar .mode-toggle {
+  margin-left: auto;
 }
 .mode-toggle {
   display: inline-flex;
@@ -1321,9 +1326,15 @@ a:hover {
     padding: 12px 16px;
     gap: 12px;
   }
-  /* Mode toggle drops back to a stacked top-left row on narrow widths. */
+  /* Toolbar stacks on narrow widths — toggle first (its pre-desktop spot),
+     then the "Build your run" block. */
   .shows-toolbar {
-    justify-content: flex-start;
+    flex-direction: column-reverse;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .shows-toolbar .mode-toggle {
+    margin-left: 0;
   }
   /* Search drops to its own full-width row under the tabs. */
   .search-wrap {
