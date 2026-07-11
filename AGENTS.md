@@ -15,6 +15,9 @@ ambiguous. Data contracts: `DEPLOY-CONTRACTS.md` §5 (submission schema),
 - Never commit, push, or modify `data/phish.db`. Your ONLY write surface is
   `data/predictions/submitted/` (via the submit tool) plus the R2 push in
   step 6.
+- Helper scripts and dumps you write along the way (context extracts, a
+  submitter carrying your picks, etc.) go in `tmp/` (gitignored), NEVER the
+  repo root. Delete them when you're done unless the human asks to keep them.
 
 ## The task: submit scoreboard predictions for every future show
 
