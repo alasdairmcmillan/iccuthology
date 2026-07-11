@@ -31,16 +31,23 @@ disk cache, prompt builder).
 ```
 phishpred llm-submit --model llm:anthropic:claude-opus-4-8 --label claude-opus
                      [--shows run|horizon]        # default: run
-                     [--with-setlist]             # also ask for a structured setlist call
+                     [--no-setlist]               # setlist call is ON by default (see below)
                      [--submitted DIR]            # default data/predictions/submitted
                      [--dry-run]
 ```
+
+2026-07-11 decision: the structured setlist call is part of the standard
+submission contract, not an add-on — every live model track submits both
+benchmarks. So the flag is `--no-setlist` (opt OUT), not `--with-setlist`.
+The submission contract, model-label rules, and the canonical agent prompt
+this pipeline must reproduce live in `docs/MCP.md` § "Agent playbook —
+driving a live model track"; keep the two in sync.
 
 Per selected show:
 1. Build the candidate frame the same way `predict`/`llm.py` do
    (`LLMSongModel` path — reuse, don't fork).
 2. One `complete_json` call returning the §5 shapes: the existing
-   `predictions` array, plus (with `--with-setlist`) a `setlist.sets` object.
+   `predictions` array, plus (unless `--no-setlist`) a `setlist.sets` object.
    Extend `PREDICTIONS_SCHEMA` + `SYSTEM_PROMPT` accordingly (see below).
 3. Write via `phishpred.mcp.tools.submit_prediction(...)` — this inherits
    slug/prob/setlist validation AND versioning (prior takes preserved,
@@ -61,7 +68,7 @@ state: `f"{PROMPT_VERSION}:asof{max_played_show_index}"`. Within one epoch the
 cache holds; ingesting a new show changes `max_played_show_index` and forces a
 fresh call with the updated context. No manual cache busting.
 
-### Prompt/schema extension (`--with-setlist`)
+### Prompt/schema extension (setlist call, on by default)
 
 - `PREDICTIONS_SCHEMA` gains optional `setlist`:
   `{"sets": {"<label>": ["slug", ...]}}` — same §5 rules the submit tool
@@ -82,8 +89,8 @@ New step between `phishpred refresh` and the epoch gate:
 ```yaml
 - name: LLM re-predictions
   run: |
-    uv run phishpred llm-submit --model llm:anthropic:claude-opus-4-8 --label claude-opus --with-setlist
-    uv run phishpred llm-submit --model llm:gemini:<current-flash-id> --label gemini-flash --with-setlist
+    uv run phishpred llm-submit --model llm:anthropic:claude-opus-4-8 --label claude-opus
+    uv run phishpred llm-submit --model llm:gemini:<current-flash-id> --label gemini-flash
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
