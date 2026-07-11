@@ -74,10 +74,13 @@ Hard rules (Phish rotation, non-negotiable):
 ### 4. Submit — one call per show, ALL THREE parts every time
 
 Submit YOUR OWN reasoning — the whole point of a model track is that the
-predictions reflect the model's judgment. Do not generate them by running
-`scripts/make_predictions.py`: that static-formula script is the dedicated
-generator for the `gemini-3.5-flash-high` track ONLY, and running it under
-any other label would submit formula output disguised as model reasoning.
+predictions reflect the model's judgment. Do NOT write or run a batch script
+that generates predictions from a formula, templates, or the repo's own
+sampler, and never run `scripts/make_predictions.py` (a retired formula
+generator kept for history — its takes were retired from the
+`gemini-3.5-flash-high` track on 2026-07-11). Every live track is per-show
+model reasoning; formula or template output submitted under a model's label
+is disguised plagiarism of the pipeline and will be removed.
 
 ```python
 tools.submit_prediction(

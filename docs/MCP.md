@@ -203,12 +203,12 @@ source key `mcp:<label>` and a row on the public scoreboard.
 3. **Reuse the existing label exactly** on every subsequent submission —
    a typo mints a new competitor instead of a new version. Existing tracks:
    `claude-fable`, `claude-sonnet`, `claude-opus`, `claude-haiku`,
-   `gemini-3.5-flash-high`. That last track was SEEDED by the static-formula
-   script `scripts/make_predictions.py`; live Gemini 3.5 Flash High agent
-   runs continue it under the same label (the static takes are preserved as
-   `versions`, and the live take becomes the official one). A different
-   Gemini model is a different track — e.g. Gemini 3.1 Pro submits as
-   `gemini-3-1-pro`, never under the flash label.
+   `gemini-3.5-flash-high`, `gemini-3.1-pro`. Every track is live per-show
+   model reasoning: the flash track's original static-formula takes
+   (`scripts/make_predictions.py`, now retired) were removed from its
+   version history on 2026-07-11 when the model re-submitted with real
+   reasoning. A different model is a different track — Gemini 3.1 Pro
+   submits as `gemini-3.1-pro`, never under the flash label.
 4. Pin the label IN THE PROMPT. Never let the agent pick its own label.
 
 ### What a submission must contain
