@@ -110,15 +110,30 @@ Definitions (binding):
 def heuristic_scores(df: pd.DataFrame) -> pd.DataFrame
     """Input: feature frame (FEATURE_COLUMNS present). Returns copy with added
     columns: `score` plus `recent_rate`, `w_recent`, and multiplier columns
-    `m_prev_show`, `m_in_run`, `m_venue`, `m_due` (for driver explanations).
-    score = base * m_prev_show * m_in_run * m_venue * m_due
+    `m_prev_show`, `m_in_run`, `m_cooldown`, `m_venue`, `m_due` (for driver
+    explanations).
+    score = base * m_prev_show * m_in_run * m_cooldown * m_venue * m_due
       recent_rate = plays_last_150 / RECENT_RATE_WINDOW
       w_recent    = clip((4 - gap_ratio) / 3, 0, 1)   # 1 while gap_ratio<=1, 0 at >=4
       base        = max(decayed_rate, w_recent * recent_rate)
       m_prev_show = 0.02 if played_prev_show else 1.0
       m_in_run    = 0.05 if played_in_run (and not prev show) else 1.0
+      m_cooldown  = COOLDOWN_GAP2 if gap == 2, COOLDOWN_GAP3 if gap == 3
+                    (only when NOT played_prev_show and NOT played_in_run), else 1.0
       m_venue     = 0.3 if venue_gap <= 2 else 1.0
       m_due       = 1 + 0.3 * clip(gap_ratio - 1, 0, 2)
+    Multiplier precedence is exclusive: gap==1 -> m_prev_show only; in-run
+    (gap>=2) -> m_in_run only; cross-run gap 2/3 -> m_cooldown only. COOLDOWN_GAP2
+    and COOLDOWN_GAP3 are module constants CALIBRATED from history by
+    scripts/calibrate_cooldown.py (empirical play rate at cross-run gap 2/3
+    relative to the no-cooldown model's predicted rate, pre-holdout shows only;
+    calibrated on the ERA-4 slice via --min-year 2021 because the cooldown is
+    strongly era-dependent — pooled 2009+ shows no gap-3 suppression while era 4
+    does); the chosen values and their calibration evidence are documented next
+    to the constants. Rationale: Phish rarely repeats a song
+    within ~3 shows even across run boundaries (prior art: phish.net Trey's
+    Notebook hard-excludes anything played in the last 3 stats shows); the old
+    model only penalized gap==1 and within-run repeats.
     The long-window floor keeps steady-but-rare rotation songs alive mid-cycle;
     the w_recent gate removes it beyond 4x median gap so decayed_rate + capped
     m_due stay the only bust-out mechanism. base >= decayed_rate elementwise."""
@@ -144,6 +159,28 @@ def ml_predict(model, df, k: float) -> pd.DataFrame  # adds `prob` via renormali
 
 Training data: rows with show year >= 2009 (era 3.0+). Fixed seeds everywhere.
 
+## models/notebook.py (Sonnet — Trey's Notebook baseline)
+
+Reproduction of phish.net's "Trey's Notebook" prior art as a named backtest
+baseline (rank by trailing-year play count, hard-exclude anything played in the
+last 3 shows). Backtest-only: must NOT become selectable in predict/publish/
+simulate paths.
+
+```python
+NOTEBOOK_COOLDOWN_SHOWS = 3   # phish.net: "not appeared in the last 3 shows"
+
+def notebook_scores(df: pd.DataFrame) -> pd.DataFrame
+    """Returns copy with `score` = plays_last_50 if gap > NOTEBOOK_COOLDOWN_SHOWS
+    else 0.0. plays_last_50 (era 4 averages ~46 shows/yr, so 50 shows ≈ 1.08
+    trailing years) is our shows-domain stand-in for phish.net's trailing
+    calendar year; document the approximation."""
+
+def notebook_predict(df: pd.DataFrame, k: float) -> pd.DataFrame
+    """notebook_scores + `prob` via probs.renormalize_to_k(score, k), grouped
+    per show like heuristic_predict. All-zero score groups renormalize safely
+    (verify renormalize_to_k handles the zero vector; guard if not)."""
+```
+
 ## backtest.py (Opus — phase 5)
 
 ```python
@@ -151,10 +188,16 @@ def run_backtest(conn, half_lives=(25, 50, 100), holdout_tours=2, seed=42) -> Ba
     """Holdout = shows of the `holdout_tours` most recent distinct tours that have
     setlists. Walk-forward: features already leakage-free per show, so train on
     show_index < holdout start, validate/calibrate on the tail of train (e.g. last
-    15%), score each holdout show. Models: heuristic, lr, gbm. Metrics per model:
+    15%), score each holdout show. Models: notebook (untrained baseline),
+    heuristic, lr, gbm. Metrics per model:
     Brier, log loss, Hit@20, Hit@25, calibration table (10 buckets: predicted vs
-    empirical vs n). H sweep applies to all models (features rebuilt per H).
-    BacktestReport must render to a plain-text table (__str__ or .render())."""
+    empirical vs n). H sweep applies to all models (features rebuilt per H;
+    notebook is H-invariant — its identical rows per H are expected and cheap).
+    BacktestReport must render to a plain-text table (__str__ or .render()).
+    MODEL_NAMES ordering: ["notebook", "heuristic", "lr", "gbm"] — check every
+    importer of MODEL_NAMES first; if any non-backtest module (publish, score,
+    predict, cli) iterates it, keep that module's behavior unchanged (introduce a
+    backtest-scoped list rather than silently expanding shared surface)."""
 ```
 
 ## predict.py (Sonnet — phase 6)

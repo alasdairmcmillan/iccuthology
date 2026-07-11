@@ -127,6 +127,7 @@ def _heuristic_drivers(row: pd.Series) -> list[str]:
     for col, label in (
         ("m_prev_show", "prev-show"),
         ("m_in_run", "in-run"),
+        ("m_cooldown", "cooldown"),
         ("m_venue", "venue"),
         ("m_due", "due"),
     ):

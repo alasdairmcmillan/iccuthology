@@ -1,10 +1,11 @@
 """Walk-forward backtest harness. See CONTRACTS.md section `backtest.py`.
 
-Compares the heuristic baseline against calibrated LR / GBM over a holdout of the
-most-recent complete tours, sweeping the decayed-rate half-life. The expensive
-pieces (holdout selection, feature build, train/valid split, model training,
-metrics) are factored into standalone functions so tests can drive them with
-synthetic data without touching a real database.
+Compares the untrained Trey's Notebook prior-art baseline, the heuristic
+baseline, and calibrated LR / GBM over a holdout of the most-recent complete
+tours, sweeping the decayed-rate half-life. The expensive pieces (holdout
+selection, feature build, train/valid split, model training, metrics) are
+factored into standalone functions so tests can drive them with synthetic
+data without touching a real database.
 """
 from __future__ import annotations
 
@@ -19,7 +20,12 @@ import pandas as pd
 from phishpred import config
 
 # Model column order used everywhere the report is built / rendered.
-MODEL_NAMES = ["heuristic", "lr", "gbm"]
+# "notebook" is the Trey's Notebook baseline (models/notebook.py) — untrained,
+# H-invariant (identical rows across the half-life sweep; expected and cheap),
+# backtest-only: no non-backtest module iterates MODEL_NAMES (verified — see
+# CONTRACTS.md `backtest.py`), so it is safe to add here directly rather than
+# introducing a separate backtest-scoped list.
+MODEL_NAMES = ["notebook", "heuristic", "lr", "gbm"]
 
 TRAIN_MIN_YEAR = 2009
 VALID_FRACTION = 0.15
@@ -252,6 +258,7 @@ def predict_holdout(
     """
     from phishpred.models.heuristic import heuristic_predict
     from phishpred.models.ml import ml_predict
+    from phishpred.models.notebook import notebook_predict
 
     parts: dict[str, list[pd.DataFrame]] = {name: [] for name in MODEL_NAMES}
     if len(holdout_df) == 0:
@@ -259,6 +266,7 @@ def predict_holdout(
 
     for _, show_rows in holdout_df.groupby("showid"):
         k = k_for_year(_year(show_rows["showdate"].iloc[0]))
+        parts["notebook"].append(notebook_predict(show_rows, k))
         parts["heuristic"].append(heuristic_predict(show_rows, k))
         parts["lr"].append(ml_predict(models["lr"], show_rows, k))
         parts["gbm"].append(ml_predict(models["gbm"], show_rows, k))
@@ -335,7 +343,7 @@ def run_backtest(
     seed: int = 42,
     gbm_params: dict[str, Any] | None = None,
 ) -> BacktestReport:
-    """Full walk-forward backtest: heuristic vs LR vs GBM across the H sweep."""
+    """Full walk-forward backtest: notebook vs heuristic vs LR vs GBM across the H sweep."""
     from phishpred import features as feat
 
     holdout = select_holdout(conn, holdout_tours=holdout_tours)
