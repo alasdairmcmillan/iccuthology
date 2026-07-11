@@ -333,24 +333,28 @@ export default function ShowsScreen({
 
   return (
     <>
-      {/* Mode toggle — future predictions (default) vs. past scorecards (§8). */}
-      <div className="mode-toggle" role="tablist" aria-label="Prediction mode">
-        <button
-          className={"mode-option" + (mode === "upcoming" ? " active" : "")}
-          role="tab"
-          aria-selected={mode === "upcoming"}
-          onClick={() => setMode("upcoming")}
-        >
-          Upcoming
-        </button>
-        <button
-          className={"mode-option" + (mode === "past" ? " active" : "")}
-          role="tab"
-          aria-selected={mode === "past"}
-          onClick={() => setMode("past")}
-        >
-          Past scorecards
-        </button>
+      {/* Mode toggle — future predictions (default) vs. past scorecards (§8).
+          Right-aligned at desktop widths, stacked top-left (today's behavior)
+          on narrow/mobile widths — see .shows-toolbar in styles.css. */}
+      <div className="shows-toolbar">
+        <div className="mode-toggle" role="tablist" aria-label="Prediction mode">
+          <button
+            className={"mode-option" + (mode === "upcoming" ? " active" : "")}
+            role="tab"
+            aria-selected={mode === "upcoming"}
+            onClick={() => setMode("upcoming")}
+          >
+            Upcoming
+          </button>
+          <button
+            className={"mode-option" + (mode === "past" ? " active" : "")}
+            role="tab"
+            aria-selected={mode === "past"}
+            onClick={() => setMode("past")}
+          >
+            Past scorecards
+          </button>
+        </div>
       </div>
 
       {mode === "upcoming" && (

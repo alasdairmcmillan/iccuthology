@@ -138,11 +138,10 @@ export default function ToursScreen({
         style={{
           display: "flex",
           alignItems: "baseline",
-          justifyContent: "space-between",
+          justifyContent: "flex-end",
           marginBottom: 18,
         }}
       >
-        <span className="screen-title">Tours</span>
         <span className="mono" style={{ color: "var(--text-muted)", fontSize: 11 }}>
           MODEL: {tourData.model.toUpperCase()}
         </span>
