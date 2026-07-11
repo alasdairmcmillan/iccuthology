@@ -73,6 +73,12 @@ Hard rules (Phish rotation, non-negotiable):
 
 ### 4. Submit — one call per show, ALL THREE parts every time
 
+Submit YOUR OWN reasoning — the whole point of a model track is that the
+predictions reflect the model's judgment. Do not generate them by running
+`scripts/make_predictions.py`: that static-formula script is the dedicated
+generator for the `gemini-3.5-flash-high` track ONLY, and running it under
+any other label would submit formula output disguised as model reasoning.
+
 ```python
 tools.submit_prediction(
     showdate,                      # "YYYY-MM-DD"
@@ -113,11 +119,17 @@ lost.
 
 ### 6. Publish (nothing is live until this runs)
 
-Submissions are local files until pushed to the R2 `submitted/` prefix. From
-the repo root:
+Submissions are local files until pushed to the R2 `submitted/` prefix. From the repo root:
 
-```
+Using `uv` and `dotenv` CLI:
+```bash
 python -m uv run dotenv -f .env.local run -- python scripts/r2_push.py data/predictions/submitted submitted
+```
+
+Or using the direct Python fallback (recommended if `uv` or `dotenv` CLI is not available):
+```bash
+# If uv is not available, run: .\.venv\Scripts\python.exe ...
+python -c "from phishpred.config import _load_env; _load_env(); from scripts.r2_push import main; main(['data/predictions/submitted', 'submitted'])"
 ```
 
 (R2 credentials live in `.env.local`.) The push changes the epoch's

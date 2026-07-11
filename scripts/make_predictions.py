@@ -12,9 +12,16 @@ at the venue), so it multiplies nearly every candidate by 1.15 -- a ranking
 near-no-op rather than real venue affinity. A corrected strategy should be
 submitted under a new model_label rather than by editing this file.
 
-Re-running overwrites submitted/{label}/{date}.json for shows >= today and
-refreshes their submitted_at stamps -- avoid once pre-show freeze times matter
-for accuracy scoring.
+Re-running overwrites submitted/{label}/{date}.json for shows >= today; prior
+takes are preserved in each file's "versions" array (submission versioning,
+DEPLOY-CONTRACTS.md §5), so the improvement arc survives.
+
+2026-07-11 amendment (Antigravity + review): setlist generation via
+phishpred.setlist.sample_setlist was added for the setlist benchmark; the
+probability formula above remains verbatim. Fixed same day: prior nights'
+SAMPLED SETLISTS within a run are now excluded from later nights' setlists
+(the original exclusion only covered the >0.08 prediction shortlist, letting
+the sampler repeat calls across nights of a future run).
 """
 import sqlite3
 import json
@@ -22,6 +29,7 @@ import os
 from pathlib import Path
 from phishpred import predict
 from phishpred.mcp import tools
+from phishpred.setlist import sample_setlist
 
 def main():
     db_path = Path("data/phish.db")
@@ -31,6 +39,9 @@ def main():
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+
+    # Map song slugs to song IDs for setlist exclusions
+    known_slug_to_id = {row["slug"]: row["songid"] for row in conn.execute("SELECT slug, songid FROM songs")}
 
     upcoming = predict.upcoming_shows(conn, limit=100)
     print(f"Found {len(upcoming)} upcoming shows.")
@@ -43,6 +54,7 @@ def main():
     # We will iterate through shows chronologically.
     # Keep track of what we predicted with high probability (> 0.08) in the current run.
     run_predictions = {} # run_id -> set of slugs predicted in this run
+    run_setlists = {}    # run_id -> slugs already CALLED in prior nights' sampled setlists
 
     # Let's define the model label
     model_label = "gemini-3.5-flash-high"
@@ -85,6 +97,8 @@ def main():
 
         if run_id not in run_predictions:
             run_predictions[run_id] = {}
+        if run_id not in run_setlists:
+            run_setlists[run_id] = set()
 
         # Get songs already played in this run (from run context)
         played_in_run_so_far = set()
@@ -177,6 +191,28 @@ def main():
         else:
             rationale += "Fresh venue run starts tonight."
 
+        # Generate setlist prediction
+        setlist_payload = None
+        try:
+            exclude_slugs = played_in_run_so_far | predicted_in_run_so_far | run_setlists[run_id]
+            exclude_ids = {known_slug_to_id[slug] for slug in exclude_slugs if slug in known_slug_to_id}
+            pred_setlist = sample_setlist(
+                conn,
+                showdate,
+                exclude_songids=exclude_ids
+            )
+            setlist_payload = {
+                "sets": {
+                    label: [s.slug for s in songs]
+                    for label, songs in pred_setlist.sets.items()
+                }
+            }
+            # Joint consistency: later nights of this run must not re-call these
+            for songs in setlist_payload["sets"].values():
+                run_setlists[run_id].update(songs)
+        except Exception as e:
+            print(f"Failed to generate setlist for {showdate}: {e}")
+
         # Submit prediction
         try:
             res = tools.submit_prediction(
@@ -184,6 +220,7 @@ def main():
                 model_label=model_label,
                 predictions=submit_preds,
                 rationale=rationale,
+                setlist=setlist_payload,
                 conn=conn,
                 out_dir=out_dir
             )
