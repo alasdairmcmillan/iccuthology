@@ -22,6 +22,12 @@ probability formula above remains verbatim. Fixed same day: prior nights'
 SAMPLED SETLISTS within a run are now excluded from later nights' setlists
 (the original exclusion only covered the >0.08 prediction shortlist, letting
 the sampler repeat calls across nights of a future run).
+
+RETIRED 2026-07-11 (same day, later): the gemini-3.5-flash-high track
+re-submitted every future show with live per-show agent reasoning, and the
+formula-era takes were removed from the track's version history. This script
+is now a historical artifact — do NOT use it to generate submissions for any
+live model track (see AGENTS.md step 4).
 """
 import sqlite3
 import json
