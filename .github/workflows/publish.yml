@@ -43,12 +43,16 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
+      # Scoring runs UNGATED: the epoch key does not change when an already-
+      # indexed show's setlist gains more rows (a partial mid-show ingest that
+      # completes later), so gating on `changed` would strand partial
+      # scorecards — the rescore window (score.py) needs every run to rescore
+      # recent shows for the self-heal to happen. Scoring is cheap and
+      # idempotent outside that window.
       - name: Score frozen past predictions
-        if: steps.gate.outputs.changed == 'true'
         run: uv run phishpred score --frozen data/frozen/show --out data/scorecards
 
       - name: Sync scorecards to R2
-        if: steps.gate.outputs.changed == 'true'
         run: uv run python scripts/r2_push.py data/scorecards scorecards
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}

@@ -428,10 +428,13 @@ phish.net's domain; `phishnet_url` links out.
 ```
 
 **Workflow wiring** (`.github/workflows/publish.yml`): the restore step also
-pulls `frozen/` → `data/frozen/` and `scorecards/` → `data/scorecards/`; after
-a gated publish, run `phishpred score --frozen data/frozen/show --out
-data/scorecards`, push `data/scorecards` → `scorecards`, and push
-`build/snapshots/show` → `frozen/show`. All gated on `changed == 'true'` —
-ingesting a played setlist always changes the epoch, so scoring never misses.
+pulls `frozen/` → `data/frozen/` and `scorecards/` → `data/scorecards/`; every
+run then executes `phishpred score --frozen data/frozen/show --out
+data/scorecards` and pushes `data/scorecards` → `scorecards` UNGATED, because
+the epoch does NOT change when an already-indexed show's setlist merely gains
+rows (partial mid-show ingest completing later) — the rescore window needs
+every run to fire for partial scorecards to self-heal. The publish itself and
+the `build/snapshots/show` → `frozen/show` freeze stay gated on
+`changed == 'true'`.
 
 ---
