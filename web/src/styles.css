@@ -771,12 +771,17 @@ a:hover {
    (max-width: 720px) stacks them, toggle first. */
 .shows-toolbar {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 16px;
   margin-bottom: 24px;
 }
+/* The toggle sits on the same band as the multiselect control and matches
+   its rendered height (43px = .multiselect-toggle's 12px padding-block +
+   ~17px line + 1px borders) so the two read as one row of controls. */
 .shows-toolbar .mode-toggle {
   margin-left: auto;
+  height: 43px;
+  align-items: center;
 }
 .mode-toggle {
   display: inline-flex;
@@ -798,6 +803,7 @@ a:hover {
   letter-spacing: 0.04em;
   padding: 7px 16px;
   border-radius: var(--radius-sm);
+  white-space: nowrap;
 }
 .mode-option.active {
   background: var(--accent);

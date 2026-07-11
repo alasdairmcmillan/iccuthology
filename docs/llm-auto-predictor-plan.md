@@ -130,3 +130,34 @@ when `--dry-run`; otherwise exit 0 unless zero shows could be processed.
   with warning, predictions still submitted).
 - Workflow step is `continue-on-error` — no CI test needed beyond the unit
   layer.
+
+## Future: per-model tour predictions (Tours page model picker)
+
+Status: idea to review, further out than the auto-predictor above. The Tours
+page is heuristic-only today (its `MODEL:` label was removed 2026-07-11 until
+this exists). Sketch:
+
+- **What the heuristic has that others don't:** `tour.json` is a reduction
+  over the Monte-Carlo `samples.bin` (joint simulation — expected plays,
+  P(≥1), full play-count distributions). MCP/LLM sources only have per-show
+  probability shortlists, so an exact joint reduction isn't possible for them.
+- **Approximation that IS possible:** treat a model's per-show probs as
+  independent across nights and reduce analytically over the tour horizon:
+  `p_at_least_one = 1 − Π(1−p_i)`, `expected_plays = Σ p_i`. No distribution
+  column (or a Poisson-binomial approximation if we want one). This mirrors
+  the frontend's existing offline run fallback (`RunReport.approximate`), so
+  the caveat pattern already exists in the UI vocabulary.
+- **Coverage caveat:** a model only "covers" shows it submitted for. Publish
+  a per-model `n_shows_covered / horizon` so the UI can badge partial
+  coverage; exclude uncovered nights from the reduction rather than
+  zero-filling them.
+- **Publish shape:** either extra per-model tables `tour/{tour_id}.{label}.json`
+  or a `sources` map inside the existing tour docs (mirroring
+  `show/{showdate}.json`'s multi-source §2 shape — probably the cleaner
+  precedent). Epoch-scoped like the rest of the snapshots. Contract addition
+  to DEPLOY-CONTRACTS §2 before implementation.
+- **UI:** model picker on the Tours page (same derive-from-sources pattern as
+  the Shows screen), `approximate` note + coverage badge for non-heuristic
+  models; the `MODEL:` label returns as the picker.
+- **Prereq:** the auto-predictor above, so non-heuristic models actually have
+  fresh per-show probs across the whole horizon worth aggregating.

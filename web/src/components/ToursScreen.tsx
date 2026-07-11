@@ -134,9 +134,9 @@ export default function ToursScreen({
 
   return (
     <>
-      {/* The MODEL label shares the pills row (top-right) — a header row of
-          its own left a mostly-empty band after the redundant "Tours" title
-          was dropped. */}
+      {/* No model label here (yet): tour tables are heuristic-only until
+          per-model tour predictions are wired up — see
+          docs/llm-auto-predictor-plan.md "Per-model tour predictions". */}
       <div className="tour-pills">
         {options.map((o) => (
           <button
@@ -152,17 +152,6 @@ export default function ToursScreen({
             <div className="pill-sub">{o.subLabel}</div>
           </button>
         ))}
-        <span
-          className="mono"
-          style={{
-            color: "var(--text-muted)",
-            fontSize: 11,
-            marginLeft: "auto",
-            alignSelf: "flex-start",
-          }}
-        >
-          MODEL: {tourData.model.toUpperCase()}
-        </span>
       </div>
 
       {!selected.hasData ? (
