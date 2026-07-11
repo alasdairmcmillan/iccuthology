@@ -100,7 +100,6 @@ export default function ShowsScreen({
   const [mode, setMode] = useState<"upcoming" | "past">("upcoming");
   const [scoreboard, setScoreboard] = useState<Scoreboard | null>(null);
   const [scoreboardError, setScoreboardError] = useState<string | null>(null);
-  const [scoreboardLoading, setScoreboardLoading] = useState(false);
   const [pastDate, setPastDate] = useState<string | null>(null);
   const [pastModel, setPastModel] = useState<string | null>(null);
   const [scorecards, setScorecards] = useState<Record<string, Scorecard>>({});
@@ -152,25 +151,23 @@ export default function ShowsScreen({
     };
   }, [sortedSelected.join(","), meta.headline_model]);
 
-  // Lazy-fetch the scoreboard the first time past mode is opened.
+  // Lazy-fetch the scoreboard the first time past mode is opened. NOTE: the
+  // effect must not depend on state it sets itself — a self-triggered re-run
+  // fires the cleanup, flips `cancelled`, and the response is thrown away.
   useEffect(() => {
-    if (mode !== "past" || scoreboard || scoreboardLoading || scoreboardError) return;
+    if (mode !== "past" || scoreboard || scoreboardError) return;
     let cancelled = false;
-    setScoreboardLoading(true);
     fetchScoreboard()
       .then((sb) => {
         if (!cancelled) setScoreboard(sb);
       })
       .catch((err) => {
         if (!cancelled) setScoreboardError(err?.message ?? String(err));
-      })
-      .finally(() => {
-        if (!cancelled) setScoreboardLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [mode, scoreboard, scoreboardLoading, scoreboardError]);
+  }, [mode, scoreboard, scoreboardError]);
 
   // Selected past show — default to the most recent scored show (shows desc).
   const activePastDate = useMemo(() => {
