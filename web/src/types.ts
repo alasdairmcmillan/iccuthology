@@ -69,12 +69,33 @@ export interface ShowSourceRow {
   gap?: number;
   drivers?: string[];
 }
+// A submitted structured setlist call (DEPLOY-CONTRACTS §2/§5) — the 2nd
+// benchmark, independent of the ranked `rows` shortlist above.
+export interface ShowSetlistSlot {
+  slug: string;
+  song: string;
+}
+export interface ShowSetlist {
+  sets: Record<string, ShowSetlistSlot[]>;
+}
+// A PRIOR submission for the same {label, showdate} (§5 versioning), oldest
+// first. The top-level ShowSource is always the FINAL/current take.
+export interface ShowSourceVersion {
+  submitted_at: string;
+  rationale?: string;
+  rows: ShowSourceRow[];
+  setlist?: ShowSetlist;
+}
 export interface ShowSource {
   model: string;
   kind: "statistical" | "llm" | "mcp";
   rationale?: string;
   submitted_at?: string;
   rows: ShowSourceRow[];
+  /** OPTIONAL structured setlist call (§2/§5); absent if not submitted. */
+  setlist?: ShowSetlist;
+  /** OPTIONAL prior takes, oldest first; absent if none. */
+  versions?: ShowSourceVersion[];
 }
 export interface ShowReport {
   showdate: string;
@@ -153,6 +174,24 @@ export interface ScoreboardShow {
   n_played: number;
   source_keys: string[];
 }
+// §8 setlist-benchmark aggregate over scored shows (absent when no
+// setlist-scored shows for this model). marquee_calls/exact_calls/
+// sharpshooters are TOTALS; hit_rate/placed_rate are unweighted means.
+export interface ScoreboardModelSetlist {
+  n_shows: number;
+  hit_rate: number;
+  placed_rate: number;
+  marquee_calls: number;
+  exact_calls: number;
+  sharpshooters: number;
+}
+// §8 "Monty Hall dividend" — final take vs. each show's first take (absent
+// when no multi-take shows for this model).
+export interface ScoreboardModelRefreshGain {
+  n_shows: number;
+  mean_hit_rate_top10_delta: number;
+  mean_recall_delta: number;
+}
 export interface ScoreboardModel {
   kind: "statistical" | "llm" | "mcp";
   n_shows: number;
@@ -160,6 +199,8 @@ export interface ScoreboardModel {
   recall: number;
   brier: number;
   log_loss: number;
+  setlist?: ScoreboardModelSetlist;
+  refresh_gain?: ScoreboardModelRefreshGain;
 }
 export interface Scoreboard {
   updated_at: string;
@@ -193,6 +234,49 @@ export interface ScorecardRow {
   prob: number;
   hit: boolean;
 }
+// Setlist benchmark (§8) — non-null only when the frozen source carried a
+// structured setlist call; sources without one (incl. legacy v0) sit out and
+// their setlist_score is null.
+export interface ScorecardSetlistSong {
+  slug: string;
+  song: string;
+  hit: boolean;
+  placed: boolean;
+}
+export interface ScorecardSetlistMarquee {
+  opener?: boolean;
+  set1_closer?: boolean;
+  set2_opener?: boolean;
+  set2_closer?: boolean;
+  encore?: boolean;
+  // Marquee flags only compare set keys present on BOTH sides, so extra keys
+  // (e.g. a called "3" the band never played) simply won't appear.
+  [slot: string]: boolean | undefined;
+}
+export interface ScorecardSetlistScore {
+  n_songs: number;
+  /** predicted setlist by set, annotated hit/placed */
+  sets: Record<string, ScorecardSetlistSong[]>;
+  hits: number;
+  hit_rate: number;
+  placed: number;
+  placed_rate: number;
+  marquee: ScorecardSetlistMarquee;
+  marquee_calls: number;
+  exact_calls: number;
+  /** exact_calls >= 2 */
+  sharpshooter: boolean;
+}
+// A PRIOR frozen take, scored with the same machinery, oldest first (§8
+// versioning). The top-level ScorecardSource is always the FINAL take.
+export interface ScorecardVersion {
+  submitted_at: string;
+  /** UI labeling heuristic; null -> "pre-run" */
+  after_showdate: string | null;
+  metrics: ScorecardMetrics;
+  setlist_score: ScorecardSetlistScore | null;
+  rows: ScorecardRow[];
+}
 export interface ScorecardSource {
   model: string;
   kind: "statistical" | "llm" | "mcp";
@@ -205,6 +289,13 @@ export interface ScorecardSource {
   // mcp:* sources keep their frozen submission fields verbatim.
   rationale?: string;
   submitted_at?: string;
+  /** null when this source has no setlist call (sits out the benchmark).
+   *  OPTIONAL for backward compat with scorecards written before §8's
+   *  setlist benchmark shipped. */
+  setlist_score?: ScorecardSetlistScore | null;
+  /** OPTIONAL prior scored takes, oldest first; absent/empty when only one
+   *  take exists. */
+  versions?: ScorecardVersion[];
 }
 export interface Scorecard {
   showdate: string;
@@ -217,6 +308,8 @@ export interface Scorecard {
   n_played: number;
   /** distinct performed slugs, setlist order */
   played: ScoredSong[];
+  /** OPTIONAL per raw set label, position order, distinct within each set. */
+  played_sets?: Record<string, ScoredSong[]>;
   sources: Record<string, ScorecardSource>;
   /** played songs in NO source's shortlist */
   missed_by_all: ScoredSong[];

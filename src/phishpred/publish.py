@@ -24,7 +24,7 @@ import numpy as np
 from . import features
 from .config import era_for_year
 from .epoch import compute_epoch, utc_now_iso
-from .mcp.tools import _safe_label
+from .mcp.tools import _MAX_SETLIST_SONGS, _SET_KEY_RE, _safe_label
 from .models.llm import LLMError
 from .modes import _round_floats, tour_mode
 from .predict import predict_show
@@ -153,17 +153,101 @@ def _show_prediction_source(conn, showdate, model, half_life):
     return pred, {"model": pred.model, "kind": kind, "rows": rows}
 
 
+def _truncate_rationale(rationale):
+    """Cap an agent's free-text rationale at fold time (untrusted input §5/§9)."""
+    if isinstance(rationale, str) and len(rationale) > _MAX_RATIONALE:
+        return rationale[:_MAX_RATIONALE]
+    return rationale
+
+
+def _fold_rows(preds, songs, k) -> list[dict]:
+    """Validate/clamp/renorm/cap ONE submission's predictions (§5), returning
+    published rows sorted prob desc. Applied identically to the latest rows and
+    to each prior version's rows. Raises ``ValueError`` on a duplicate slug
+    (rejects the whole take); returns ``[]`` when no row is individually valid.
+
+    Probs are published AS SUBMITTED, each clamped to <= 0.99; only if their sum
+    exceeds the era's expected setlist size K are they scaled DOWN — a sparse
+    shortlist keeps its submitted probabilities (never scaled up)."""
+    valid: list[tuple[str, float]] = []
+    seen: set[str] = set()
+    for p in preds if isinstance(preds, list) else []:
+        if not isinstance(p, dict) or p.get("slug") not in songs:
+            continue
+        slug = p["slug"]
+        prob = p.get("prob")
+        if isinstance(prob, bool) or not isinstance(prob, (int, float)):
+            continue
+        prob = float(prob)
+        if not (0.0 < prob <= 1.0):
+            continue
+        if slug in seen:
+            raise ValueError(f"duplicate slug {slug!r}")
+        seen.add(slug)
+        valid.append((slug, prob))
+    if not valid:
+        return []
+
+    clamped = [min(prob, 0.99) for _s, prob in valid]
+    if sum(clamped) > k:
+        clamped = [float(x) for x in renormalize_to_k(np.array(clamped, dtype=float), k)]
+    rows = [
+        {"song": songs[slug][1], "slug": slug, "prob": prob}
+        for (slug, _orig), prob in zip(valid, clamped)
+    ]
+    rows.sort(key=lambda r: r["prob"], reverse=True)
+    return rows[:_SHOW_TOP]
+
+
+def _fold_setlist(setlist, songs):
+    """Fold a submitted structured setlist (§2/§5) into the resolved
+    ``{"sets": {"1": [{"slug","song"},...], ...}}`` shape, or ``None`` when it
+    should be dropped. Same shape rules as ``tools._validate_setlist`` but the
+    fold's tolerance philosophy applies — a malformed setlist is skipped-with-
+    warning (by the caller) rather than raised. If ANY slug is unknown the WHOLE
+    setlist is dropped: a partially-resolved setlist corrupts the placement
+    benchmark."""
+    if not isinstance(setlist, dict):
+        return None
+    sets = setlist.get("sets")
+    if not isinstance(sets, dict) or not sets:
+        return None
+    seen: set[str] = set()
+    total = 0
+    out: dict[str, list[dict]] = {}
+    for key, slugs in sets.items():
+        label = str(key)
+        if not _SET_KEY_RE.match(label):
+            return None
+        if not isinstance(slugs, list) or not slugs:
+            return None
+        resolved: list[dict] = []
+        for slug in slugs:
+            if slug not in songs:  # any unknown slug -> drop the whole setlist
+                return None
+            if slug in seen:
+                return None
+            seen.add(slug)
+            resolved.append({"slug": slug, "song": songs[slug][1]})
+            total += 1
+        out[label] = resolved
+    if total > _MAX_SETLIST_SONGS:
+        return None
+    return {"sets": out}
+
+
 def _fold_submissions(conn, submitted_dir, show_docs, half_life) -> None:
     """Fold `submitted/{label}/{showdate}.json` inbox entries into the matching
-    show doc under `sources["mcp:"+label]` (DEPLOY-CONTRACTS §5). Untrusted
+    show doc under `sources["mcp:"+label]` (DEPLOY-CONTRACTS §2/§5). Untrusted
     input: any malformed file (bad JSON, non-list predictions, non-dict entries,
     duplicate slugs) is skipped with a warning rather than crashing the batch;
     directory names that aren't already ``_safe_label``-clean are skipped too.
 
-    Renorm policy: probs are published AS SUBMITTED, each clamped to <= 0.99;
-    only if their sum exceeds the era's expected setlist size K are they scaled
-    DOWN via ``renormalize_to_k``. A sparse shortlist keeps its submitted
-    probabilities — we never scale up. Rationale is truncated and rows capped at
+    Extras (§2 fold policy): an optional structured ``setlist`` is validated and
+    slug-resolved (dropped whole with a warning if any slug is unknown), and
+    prior ``versions`` are each validated/clamped/capped with the SAME
+    ``_fold_rows`` machinery as the latest rows — a version that fails validation
+    is dropped individually. Rationale is truncated and rows capped at
     ``_SHOW_TOP``."""
     root = Path(submitted_dir) if submitted_dir else None
     if root is None or not root.exists():
@@ -185,29 +269,8 @@ def _fold_submissions(conn, submitted_dir, show_docs, half_life) -> None:
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 showdate = str(data["showdate"])
-                preds = data["predictions"]
                 if showdate not in show_docs:
                     print(f"publish: submission {f} showdate {showdate} not in horizon; skipping", file=sys.stderr)
-                    continue
-
-                valid: list[tuple[str, float]] = []
-                seen: set[str] = set()
-                for p in preds:
-                    if not isinstance(p, dict) or p.get("slug") not in songs:
-                        continue
-                    slug = p["slug"]
-                    prob = p.get("prob")
-                    if isinstance(prob, bool) or not isinstance(prob, (int, float)):
-                        continue
-                    prob = float(prob)
-                    if not (0.0 < prob <= 1.0):
-                        continue
-                    if slug in seen:
-                        raise ValueError(f"duplicate slug {slug!r}")
-                    seen.add(slug)
-                    valid.append((slug, prob))
-                if not valid:
-                    print(f"publish: submission {f} has no valid predictions; skipping", file=sys.stderr)
                     continue
 
                 era = era_for_year(int(showdate[:4]))
@@ -215,26 +278,58 @@ def _fold_submissions(conn, submitted_dir, show_docs, half_life) -> None:
                     k_by_era[era] = features.mean_setlist_size(conn, era)
                 k = k_by_era[era]
 
-                clamped = [min(prob, 0.99) for _s, prob in valid]
-                if sum(clamped) > k:
-                    clamped = [float(x) for x in renormalize_to_k(np.array(clamped, dtype=float), k)]
+                rows = _fold_rows(data["predictions"], songs, k)
+                if not rows:
+                    print(f"publish: submission {f} has no valid predictions; skipping", file=sys.stderr)
+                    continue
 
-                rationale = data.get("rationale")
-                if isinstance(rationale, str) and len(rationale) > _MAX_RATIONALE:
-                    rationale = rationale[:_MAX_RATIONALE]
-
-                rows = [
-                    {"song": songs[slug][1], "slug": slug, "prob": prob}
-                    for (slug, _orig), prob in zip(valid, clamped)
-                ]
-                rows.sort(key=lambda r: r["prob"], reverse=True)
-                show_docs[showdate]["sources"][f"mcp:{label}"] = {
+                source = {
                     "model": f"mcp:{label}",
                     "kind": "mcp",
-                    "rationale": rationale,
+                    "rationale": _truncate_rationale(data.get("rationale")),
                     "submitted_at": data.get("submitted_at"),
-                    "rows": rows[:_SHOW_TOP],
+                    "rows": rows,
                 }
+
+                # Optional structured setlist on the latest take (§2 fold policy).
+                if data.get("setlist") is not None:
+                    folded = _fold_setlist(data["setlist"], songs)
+                    if folded is not None:
+                        source["setlist"] = folded
+                    else:
+                        print(f"publish: dropping invalid/unknown setlist for {f}", file=sys.stderr)
+
+                # Prior versions: each validated with the same helper; a version
+                # that fails validation is dropped individually.
+                folded_versions: list[dict] = []
+                for v in data.get("versions") or []:
+                    if not isinstance(v, dict):
+                        print(f"publish: dropping non-dict version in {f}", file=sys.stderr)
+                        continue
+                    try:
+                        vrows = _fold_rows(v.get("predictions"), songs, k)
+                    except ValueError as exc:
+                        print(f"publish: dropping invalid version in {f}: {exc}", file=sys.stderr)
+                        continue
+                    if not vrows:
+                        print(f"publish: dropping version with no valid predictions in {f}", file=sys.stderr)
+                        continue
+                    ventry = {
+                        "submitted_at": v.get("submitted_at"),
+                        "rationale": _truncate_rationale(v.get("rationale")),
+                        "rows": vrows,
+                    }
+                    if v.get("setlist") is not None:
+                        vfolded = _fold_setlist(v["setlist"], songs)
+                        if vfolded is not None:
+                            ventry["setlist"] = vfolded
+                        else:
+                            print(f"publish: dropping invalid/unknown setlist on a version in {f}", file=sys.stderr)
+                    folded_versions.append(ventry)
+                if folded_versions:
+                    source["versions"] = folded_versions
+
+                show_docs[showdate]["sources"][f"mcp:{label}"] = source
             except (json.JSONDecodeError, KeyError, OSError, TypeError, ValueError) as exc:
                 print(f"publish: skipping malformed submission {f}: {exc}", file=sys.stderr)
                 continue

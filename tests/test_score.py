@@ -163,6 +163,135 @@ def test_score_show_missed_by_all():
 
 
 # ---------------------------------------------------------------------------
+# Pure core: setlist benchmark (setlist_score)
+# ---------------------------------------------------------------------------
+
+# Predicted structured setlist (frozen/folded shape: {slug, song} objects).
+SETLIST_PRED = {
+    "sets": {
+        "1": [
+            {"slug": "tweezer", "song": "Tweezer"},
+            {"slug": "wilson", "song": "Wilson"},
+            {"slug": "gin", "song": "Bathtub Gin"},
+        ],
+        "e": [
+            {"slug": "hood", "song": "Harry Hood"},
+            {"slug": "ghost", "song": "Ghost"},
+        ],
+    }
+}
+# Actual played sets (distinct within set, position order).
+SL_PLAYED_SETS = {
+    "1": [
+        {"slug": "tweezer", "song": "Tweezer"},
+        {"slug": "ghost", "song": "Ghost"},
+        {"slug": "wilson", "song": "Wilson"},
+    ],
+    "e": [{"slug": "hood", "song": "Harry Hood"}],
+}
+SL_PLAYED = [
+    {"slug": "tweezer", "song": "Tweezer"},
+    {"slug": "ghost", "song": "Ghost"},
+    {"slug": "wilson", "song": "Wilson"},
+    {"slug": "hood", "song": "Harry Hood"},
+]
+
+
+def test_score_show_setlist_score_hand_computed():
+    src = {
+        "model": "mcp:a", "kind": "mcp", "rationale": None, "submitted_at": None,
+        "rows": [{"song": "Tweezer", "slug": "tweezer", "prob": 0.7}],
+        "setlist": SETLIST_PRED,
+    }
+    sc = score_show(_frozen_payload({"mcp:a": src}), SL_PLAYED, SL_PLAYED_SETS)
+    ss = sc["sources"]["mcp:a"]["setlist_score"]
+
+    assert ss["n_songs"] == 5
+    assert ss["hits"] == 4                       # tweezer, wilson, hood, ghost played
+    assert ss["hit_rate"] == pytest.approx(0.8)  # 4 / 5
+    assert ss["placed"] == 3                     # tweezer, wilson (set1), hood (e)
+    assert ss["placed_rate"] == pytest.approx(0.75)  # 3 / 4 hits
+
+    assert ss["marquee"]["opener"] is True       # tweezer opens both
+    assert ss["marquee"]["encore"] is True       # hood in both encores
+    assert ss["marquee"]["set1_closer"] is False  # gin != wilson
+    assert ss["marquee"]["set2_opener"] is False  # no set 2 on either side
+    assert ss["marquee_calls"] == 2
+
+    # exact_calls: set1 pos0 tweezer==tweezer, encore pos0 hood==hood -> 2
+    assert ss["exact_calls"] == 2
+    assert ss["sharpshooter"] is True            # >= 2
+
+    ann1 = {r["slug"]: r for r in ss["sets"]["1"]}
+    assert ann1["gin"]["hit"] is False and ann1["gin"]["placed"] is False   # unplayed
+    anne = {r["slug"]: r for r in ss["sets"]["e"]}
+    assert anne["ghost"]["hit"] is True and anne["ghost"]["placed"] is False  # played, wrong set
+
+    # played_sets echoed onto the scorecard for the UI
+    assert sc["played_sets"]["1"][0]["slug"] == "tweezer"
+
+
+def test_score_show_setlist_score_null_without_setlist():
+    payload = _frozen_payload(
+        {"heuristic": {"model": "heuristic", "kind": "statistical", "rows": HEURISTIC_ROWS}}
+    )
+    sc = score_show(payload, PLAYED, SL_PLAYED_SETS)
+    # A source that carries no setlist sits out the benchmark.
+    assert sc["sources"]["heuristic"]["setlist_score"] is None
+
+
+# ---------------------------------------------------------------------------
+# Pure core: version scoring + after_showdate boundaries
+# ---------------------------------------------------------------------------
+
+def test_score_show_version_scoring_and_after_showdate():
+    src = {
+        "model": "mcp:a", "kind": "mcp", "rationale": "final",
+        "submitted_at": "2026-07-04T12:00:00Z",
+        "rows": [
+            {"song": "Tweezer", "slug": "tweezer", "prob": 0.8},
+            {"song": "Wilson", "slug": "wilson", "prob": 0.6},
+        ],
+        "versions": [
+            {"submitted_at": "2026-06-20T12:00:00Z",   # pre-run (before window)
+             "rows": [{"song": "Ghost", "slug": "ghost", "prob": 0.5}]},
+            {"submitted_at": "2026-07-04T09:00:00Z",   # after night 1 (2026-07-03)
+             "rows": [{"song": "Tweezer", "slug": "tweezer", "prob": 0.7}]},
+        ],
+    }
+    # showdate is 2026-07-05; night 1 played 2026-07-03 (within 10 days).
+    sc = score_show(_frozen_payload({"mcp:a": src}), PLAYED,
+                    played_showdates=["2026-07-01", "2026-07-03"])
+    entry = sc["sources"]["mcp:a"]
+    # top-level entry is the FINAL take (rationale kept verbatim)
+    assert entry["rationale"] == "final"
+
+    vs = entry["versions"]
+    assert len(vs) == 2                                 # oldest first
+    assert vs[0]["after_showdate"] is None              # pre-run
+    assert vs[0]["metrics"]["hits_top10"] == 0          # ghost not played
+    assert vs[1]["after_showdate"] == "2026-07-03"      # latest played in window
+    assert vs[1]["metrics"]["hits_top10"] == 1          # tweezer played
+    assert vs[1]["rows"][0]["hit"] is True              # rows carry hit flags
+
+
+def test_score_show_after_showdate_null_beyond_10_day_gap():
+    src = {
+        "model": "mcp:a", "kind": "mcp", "rationale": None,
+        "submitted_at": "2026-07-04T09:00:00Z",
+        "rows": [{"song": "Tweezer", "slug": "tweezer", "prob": 0.7}],
+        "versions": [
+            {"submitted_at": "2026-07-04T09:00:00Z",
+             "rows": [{"song": "Tweezer", "slug": "tweezer", "prob": 0.7}]},
+        ],
+    }
+    # The only played show is 34 days before the show -> outside the 10-day window.
+    sc = score_show(_frozen_payload({"mcp:a": src}), PLAYED,
+                    played_showdates=["2026-06-01"])
+    assert sc["sources"]["mcp:a"]["versions"][0]["after_showdate"] is None
+
+
+# ---------------------------------------------------------------------------
 # Pure core: build_scoreboard aggregation
 # ---------------------------------------------------------------------------
 
@@ -206,6 +335,67 @@ def test_build_scoreboard_empty():
     assert board["shows"] == []
     assert board["models"] == {}
     assert "updated_at" in board
+
+
+def test_build_scoreboard_setlist_and_refresh_gain_aggregates():
+    sc_a = {
+        "showdate": "2026-07-05", "venue_name": "V1", "city": "C1", "state": "S1", "n_played": 20,
+        "sources": {
+            "mcp:a": {
+                "kind": "mcp",
+                "metrics": {"hit_rate_top10": 0.6, "recall": 0.5, "brier": 0.1, "log_loss": 0.3},
+                "setlist_score": {"hit_rate": 0.5, "placed_rate": 0.6,
+                                  "marquee_calls": 2, "exact_calls": 1, "sharpshooter": False},
+                "versions": [  # first take -> refresh_gain compares against it
+                    {"metrics": {"hit_rate_top10": 0.4, "recall": 0.3, "brier": 0.2, "log_loss": 0.5}},
+                ],
+            },
+        },
+    }
+    sc_b = {
+        "showdate": "2026-07-08", "venue_name": "V2", "city": "C2", "state": "S2", "n_played": 22,
+        "sources": {
+            "mcp:a": {
+                "kind": "mcp",
+                "metrics": {"hit_rate_top10": 0.8, "recall": 0.7, "brier": 0.05, "log_loss": 0.1},
+                "setlist_score": {"hit_rate": 0.7, "placed_rate": 0.8,
+                                  "marquee_calls": 3, "exact_calls": 2, "sharpshooter": True},
+                # no versions here -> excluded from refresh_gain
+            },
+        },
+    }
+    m = build_scoreboard([sc_a, sc_b])["models"]["mcp:a"]
+
+    # setlist aggregate over BOTH shows: rates are means, calls/sharpshooters totals
+    sl = m["setlist"]
+    assert sl["n_shows"] == 2
+    assert sl["hit_rate"] == pytest.approx(0.6)      # mean(0.5, 0.7)
+    assert sl["placed_rate"] == pytest.approx(0.7)   # mean(0.6, 0.8)
+    assert sl["marquee_calls"] == 5                  # 2 + 3
+    assert sl["exact_calls"] == 3                    # 1 + 2
+    assert sl["sharpshooters"] == 1                  # only sc_b
+
+    # refresh_gain over the ONE show with a prior version (final - first take)
+    rg = m["refresh_gain"]
+    assert rg["n_shows"] == 1
+    assert rg["mean_hit_rate_top10_delta"] == pytest.approx(0.6 - 0.4)
+    assert rg["mean_recall_delta"] == pytest.approx(0.5 - 0.3)
+
+
+def test_build_scoreboard_omits_setlist_and_refresh_gain_when_absent():
+    sc = {
+        "showdate": "2026-07-05", "venue_name": "V", "city": "C", "state": "S", "n_played": 20,
+        "sources": {
+            "heuristic": {
+                "kind": "statistical",
+                "metrics": {"hit_rate_top10": 0.5, "recall": 0.4, "brier": 0.1, "log_loss": 0.3},
+                "setlist_score": None,   # sits out the setlist benchmark
+            },
+        },
+    }
+    m = build_scoreboard([sc])["models"]["heuristic"]
+    assert "setlist" not in m        # no setlist-scored shows
+    assert "refresh_gain" not in m   # no multi-take shows
 
 
 # ---------------------------------------------------------------------------

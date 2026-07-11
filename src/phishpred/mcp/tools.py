@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,12 @@ from ..epoch import utc_now_iso
 from ..modes import resolve_song
 
 _SAFE_LABEL_RE = re.compile(r"[^A-Za-z0-9_-]+")
+# Raw set labels a structured setlist may use: "1","2",...,"e","e2",... (§5).
+_SET_KEY_RE = re.compile(r"^(\d+|e\d*)$")
+# A structured setlist may name at most this many songs (§5).
+_MAX_SETLIST_SONGS = 40
+# Keep at most this many prior takes when a submission is rewritten (§5).
+_MAX_VERSIONS = 10
 
 
 def _safe_label(model_label: str) -> str:
@@ -371,11 +378,50 @@ def heuristic_prediction(
 # Write tool
 # ---------------------------------------------------------------------------
 
+def _validate_setlist(setlist: Any, known: dict[str, str]) -> dict[str, Any]:
+    """Validate a structured ``setlist`` call (§5) and return its clean shape
+    ``{"sets": {"1": [slug, ...], ...}}``. Raises ``ValueError`` (matching the
+    prediction-validation style) on any violation: set labels must match
+    ``^(\\d+|e\\d*)$``, each set a non-empty list of known slugs, no slug may
+    repeat anywhere in the setlist, and the total is capped at 40 songs. The
+    setlist is a separate benchmark from ``predictions`` — validated on its own.
+    """
+    if not isinstance(setlist, dict):
+        raise ValueError("setlist must be a dict shaped {'sets': {label: [slug, ...]}}")
+    sets = setlist.get("sets")
+    if not isinstance(sets, dict) or not sets:
+        raise ValueError("setlist.sets must be a non-empty mapping of set labels to slug lists")
+
+    seen: set[str] = set()
+    total = 0
+    clean: dict[str, list[str]] = {}
+    for key, songs in sets.items():
+        label = str(key)
+        if not _SET_KEY_RE.match(label):
+            raise ValueError(f"invalid set label {key!r}; must match ^(\\d+|e\\d*)$")
+        if not isinstance(songs, list) or not songs:
+            raise ValueError(f"set {label!r} must be a non-empty list of slugs")
+        clean_slugs: list[str] = []
+        for slug in songs:
+            if slug not in known:
+                raise ValueError(f"unknown slug {slug!r} in setlist set {label!r}")
+            if slug in seen:
+                raise ValueError(f"duplicate slug {slug!r} in setlist")
+            seen.add(slug)
+            clean_slugs.append(slug)
+            total += 1
+        clean[label] = clean_slugs
+    if total > _MAX_SETLIST_SONGS:
+        raise ValueError(f"setlist has {total} songs; max {_MAX_SETLIST_SONGS}")
+    return {"sets": clean}
+
+
 def submit_prediction(
     showdate: str,
     model_label: str,
     predictions: list[dict[str, Any]],
     rationale: str | None = None,
+    setlist: dict[str, Any] | None = None,
     *,
     conn: sqlite3.Connection,
     out_dir: str | Path,
@@ -397,6 +443,16 @@ def submit_prediction(
     a partial shortlist keeps its submitted probabilities instead of being
     inflated by renormalization.
 
+    ``setlist`` is an OPTIONAL structured setlist call — a SECOND benchmark
+    (§8), independent of ``predictions``: ``{"sets": {"1": [slug, ...], ...}}``
+    with set labels ``^(\\d+|e\\d*)$``, non-empty lists of known slugs, no slug
+    repeated anywhere, <= 40 songs total. An invalid setlist raises.
+
+    Versioning (§5): a resubmission for the same ``{label}/{showdate}`` never
+    loses history — the prior file's content (minus its own ``versions`` key) is
+    appended to the new file's ``versions`` array (oldest first, at most the 10
+    most recent priors kept). First submissions omit the key entirely.
+
     Ground rules: avoid high probabilities for songs flagged
     ``played_in_run``/``played_prev_show`` by ``candidate_features``, and keep
     multi-night submissions for one run jointly consistent -- see docs/MCP.md
@@ -409,6 +465,8 @@ def submit_prediction(
     resolved_showdate = str(show["showdate"])
 
     known = {row["slug"]: row["name"] for row in conn.execute("SELECT slug, name FROM songs")}
+
+    setlist_payload = _validate_setlist(setlist, known) if setlist is not None else None
 
     seen: set[str] = set()
     slugs: list[str] = []
@@ -453,11 +511,34 @@ def submit_prediction(
         "rationale": rationale,
         "predictions": rows,
     }
+    if setlist_payload is not None:
+        payload["setlist"] = setlist_payload
 
     safe_label = _safe_label(model_label)
     dest_dir = Path(out_dir) / safe_label
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / f"{resolved_showdate}.json"
+
+    # Versioning (§5): fold a prior submission for the same {label}/{showdate}
+    # into the new file's "versions" so the improvement arc across takes is
+    # preserved. Carry prior versions over first (oldest first), then the prior
+    # take itself; keep only the 10 most recent. Omit the key for a first
+    # submission so legacy-shaped output is unchanged.
+    if dest_path.exists():
+        try:
+            prior = json.loads(dest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"submit_prediction: existing {dest_path} unreadable ({exc}); "
+                  "treating as no history", file=sys.stderr)
+            prior = None
+        if isinstance(prior, dict):
+            prior_versions = prior.pop("versions", [])
+            if not isinstance(prior_versions, list):
+                prior_versions = []
+            versions = [*prior_versions, prior][-_MAX_VERSIONS:]
+            if versions:
+                payload["versions"] = versions
+
     dest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     return {"path": str(dest_path), "payload": payload}

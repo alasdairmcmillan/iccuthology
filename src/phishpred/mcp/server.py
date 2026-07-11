@@ -114,6 +114,7 @@ def submit_prediction(
     model_label: str,
     predictions: list[dict[str, Any]],
     rationale: str | None = None,
+    setlist: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Submit per-song probabilities for a future show.
 
@@ -124,6 +125,17 @@ def submit_prediction(
     publish batch to fold in as source ``mcp:{model_label}``; at fold time they
     are published as submitted and scaled down only if their sum exceeds the
     show's expected setlist size K.
+
+    ``setlist`` is an OPTIONAL structured setlist call scored as a SECOND
+    benchmark (set placement + marquee slots + exact positions), independent of
+    ``predictions``. Shape: ``{"sets": {"1": [slug, ...], "2": [...],
+    "e": [...]}}`` — set labels match ``^(\\d+|e\\d*)$``, each a non-empty list
+    of known slugs, no slug repeated anywhere, <= 40 songs total. Omit it to sit
+    out the setlist benchmark.
+
+    Resubmitting for the same show preserves prior takes: the previous file's
+    content is folded into a ``versions`` array so the UI can show the
+    improvement arc; official metrics use only the latest take.
 
     Ground rules: don't submit high probabilities for a song already flagged
     ``played_in_run``/``played_prev_show`` in ``candidate_features``, and if
@@ -136,6 +148,7 @@ def submit_prediction(
         model_label,
         predictions,
         rationale,
+        setlist=setlist,
         conn=_get_conn(),
         out_dir=DEFAULT_SUBMIT_DIR,
     )

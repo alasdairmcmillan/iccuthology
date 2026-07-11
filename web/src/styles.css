@@ -947,6 +947,180 @@ a:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+/* A 3-up variant for the setlist-benchmark stat row. */
+.metrics-strip-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 640px) {
+  .metrics-strip-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* --- Prediction versions (§8 resubmission arc) --------------------------- */
+.version-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 8px;
+}
+.version-chip {
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-label);
+  background: var(--input-bg);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.version-chip.active {
+  color: var(--accent);
+  border-color: var(--accent-a66);
+  background: var(--accent-a18);
+}
+.version-chip:focus-visible {
+  outline: none;
+  border-color: var(--accent-a66);
+}
+.improvement-line {
+  color: var(--text-label);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+.improvement-line .imp-value {
+  color: var(--accent);
+  font-weight: 700;
+}
+/* A small "revision available" note near the upcoming-mode model picker. */
+.rev-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-a18);
+  border: 1px solid var(--accent-a55);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+/* --- Setlist benchmark card (§8 setlist_score) --------------------------- */
+.setlist-song {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-row);
+}
+.setlist-mark {
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+  font-weight: 700;
+  color: var(--text-tertiary);
+}
+.setlist-mark.placed {
+  color: var(--accent);
+}
+.setlist-mark.hit-only {
+  color: var(--text-secondary);
+}
+.setlist-name {
+  flex: 1;
+  color: var(--text-primary);
+}
+.setlist-song.miss .setlist-name {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.setlist-placed-tag {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  border: 1px solid var(--accent-a55);
+  background: var(--accent-a18);
+  border-radius: 4px;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+.marquee-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 4px;
+}
+.marquee-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  border: 1px solid var(--accent-a55);
+  background: var(--accent-a18);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+}
+.sharpshooter-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--on-accent);
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+}
+
+/* --- Standings strip (past mode, per-model summary) ---------------------- */
+.standings-card {
+  margin-bottom: 24px;
+}
+.standings-scroll {
+  overflow-x: auto;
+}
+.standings-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 0.9fr 0.6fr 0.8fr 0.8fr 0.9fr 0.8fr 0.7fr 1.2fr;
+  gap: 8px;
+  align-items: center;
+  min-width: 760px;
+}
+.standings-head {
+  padding: 0 10px 8px;
+  color: var(--text-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: var(--font-mono);
+  border-bottom: 1px solid var(--border-card);
+}
+.standings-row {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border-row);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.standings-model {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.standings-dim {
+  color: var(--text-muted);
+}
+.standings-val {
+  color: var(--accent);
+  font-weight: 700;
+  text-align: right;
+}
 
 /* --- About -------------------------------------------------------------- */
 .about {

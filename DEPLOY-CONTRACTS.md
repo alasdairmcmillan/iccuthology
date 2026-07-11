@@ -123,10 +123,18 @@ Rows sorted by `expected_plays` desc. Buckets per `modes._bucket_for`.
     // "lr", "gbm": same shape when --compare-models includes them.
     // "llm:anthropic": {"model": "llm:anthropic:claude-sonnet-5", "kind": "llm", "rows": [...]}
     //   when --compare-models includes an llm:<provider>[:<model-id>] spec.
-    // "mcp:<label>": {"model": "...", "kind": "mcp", "rationale": "...", "submitted_at": "...", "rows": [...]}
+    // "mcp:<label>": {"model": "...", "kind": "mcp", "rationale": "...", "submitted_at": "...", "rows": [...],
+    //                 "setlist": {"sets": {"1": [{"slug","song"},...], "2": [...], "e": [...]}},  // §5; absent if not submitted
+    //                 "versions": [{"submitted_at","rationale","rows":[...],"setlist"?:{...}}, ...]}  // §5; PRIOR takes, oldest first; absent if none
   }
 }
 ```
+Fold policy for mcp extras: each PRIOR version's rows are validated, clamped,
+renormalized, and capped exactly like the latest rows; a version that fails
+validation is dropped individually with a warning. A submitted `setlist` whose
+slugs aren't all known is dropped whole (warning) — a partially-resolved
+setlist would corrupt the placement benchmark. Setlist slugs are resolved to
+`{"slug","song"}` objects at fold time.
 Each `sources[*].rows` sorted by `prob` desc. Statistical/LLM rows come from
 `predict_show` / `models.llm`; both are floored and renormalized to K the same
 way. The source key is the `--compare-models` string as passed; the `model`
@@ -274,7 +282,11 @@ the R2 `submitted/` prefix). Written by the MCP `submit_prediction` tool, read b
   "epoch": "a1b2c3d4e5f6",               // epoch the agent saw (pinned)
   "submitted_at": "2026-07-09T13:00:00Z",
   "rationale": "Fluffhead is due; ...",  // optional
-  "predictions": [{"slug": "harry-hood", "prob": 0.55}, ...]
+  "predictions": [{"slug": "harry-hood", "prob": 0.55}, ...],
+  "setlist": {                           // OPTIONAL structured setlist call (2nd benchmark, §8)
+    "sets": {"1": ["slug", "..."], "2": ["..."], "e": ["..."]}
+  },
+  "versions": [ ... ]                    // OPTIONAL prior submissions, oldest first (see below)
 }
 ```
 `publish` validates: known slugs, probs in (0,1] (booleans rejected), no duplicate
@@ -285,6 +297,24 @@ expected setlist size K — never scaled up, so a sparse shortlist keeps its sta
 probabilities. `rationale` is truncated to 4000 chars and rows capped at the publish
 top-N at fold time. Malformed/unknown/invalid submissions are skipped with a logged
 warning (never crash publish).
+
+**Structured setlist (optional).** `setlist.sets` keys match `^(\d+|e\d*)$` (same
+raw set labels as §2's setlist doc); values are non-empty ordered lists of known
+slugs. No slug may appear twice anywhere in the setlist; total songs <= 40. The
+setlist is INDEPENDENT of `predictions` — two different benchmarks (§8); a
+submission may carry either or both. `submit_prediction` raises on an invalid
+setlist; the publish fold skips-with-warning (§2 fold policy). Submissions
+without a setlist (including all pre-existing "v0" files) simply sit out the
+setlist benchmark.
+
+**Versioning.** A resubmission for the same `{label}/{showdate}` must not lose
+history — the improvement arc across takes IS a product feature (§8). On
+rewrite, `submit_prediction` appends the prior file's content (minus its own
+`versions` key) to the new file's `versions` array (prior versions carried
+over first, oldest first). At most the 10 most recent prior versions are kept;
+older ones are dropped. Legacy files without `versions` remain valid. The
+whole file (latest + versions) is one R2 object, so the epoch's
+`submitted_manifest_hash` picks up resubmissions with no mechanics changes.
 
 ---
 
@@ -384,6 +414,9 @@ lists are valid). The played set is the show's DISTINCT performed slugs.
   "phishnet_url": "https://phish.net/setlists/?d=2026-07-10",
   "n_played": 21,
   "played": [{"slug": "harry-hood", "song": "Harry Hood"}],   // distinct, setlist order
+  "played_sets": {                                            // per raw set label, position order,
+    "1": [{"slug": "...", "song": "..."}], "2": [...], "e": [...]   // distinct within each set
+  },
   "sources": {
     "heuristic": {
       "model": "heuristic", "kind": "statistical", "n_rows": 40,
@@ -396,7 +429,9 @@ lists are valid). The played set is the show's DISTINCT performed slugs.
       },
       "best_call": {"song": "...", "slug": "...", "prob": 0.12},     // hit with the LOWEST prob; null if no hits
       "biggest_whiff": {"song": "...", "slug": "...", "prob": 0.61}, // miss with the HIGHEST prob; null if no misses
-      "rows": [{"song": "...", "slug": "...", "prob": 0.61, "hit": true}]  // frozen rows, prob desc
+      "rows": [{"song": "...", "slug": "...", "prob": 0.61, "hit": true}],  // frozen rows, prob desc
+      "setlist_score": null,      // see below; null when the frozen source has no setlist (it sits out)
+      "versions": [ ... ]         // see below; absent/empty when only one take exists
     }
     // "mcp:claude-fable", "mcp:gemini-3.5-flash-high", ...: same shape; mcp
     // sources keep their frozen "rationale"/"submitted_at" fields verbatim.
@@ -411,6 +446,45 @@ artifacts. Boundary: this tier stores OUR predictions and a flat played-song
 list for hit/miss context — full setlists (sets, segues, jamcharts) remain
 phish.net's domain; `phishnet_url` links out.
 
+**Setlist benchmark** (`setlist_score`, non-null only when the frozen source
+carries a `setlist` — sources without one, including legacy v0 submissions,
+sit out and are excluded from scoreboard setlist aggregates):
+```json
+{
+  "n_songs": 18,
+  "sets": {"1": [{"slug","song","hit","placed"},...], "2": [...], "e": [...]},  // predicted setlist, annotated
+  "hits": 9, "hit_rate": 0.5,        // predicted songs played ANYWHERE / n_songs
+  "placed": 6, "placed_rate": 0.6667,// of hits: played in the PREDICTED set (denominator = hits; 0/0 -> 0)
+  "marquee": {                       // positional bragging rights, vs played_sets
+    "opener": true,                  //   predicted sets["1"][0] == played_sets["1"][0]
+    "set1_closer": false,            //   predicted last of set 1 == actual last of set 1
+    "set2_opener": false, "set2_closer": true,
+    "encore": true                   //   predicted "e" overlaps actual "e" (any hit; encores are 1–2 songs)
+  },
+  "marquee_calls": 3,                // count of true marquee flags
+  "exact_calls": 2,                  // positions where predicted sets[s][i] == played_sets[s][i]
+  "sharpshooter": true               // exact_calls >= 2 — the badge (rare by design)
+}
+```
+Marquee flags compare only set keys present on BOTH sides; a predicted set the
+band never played (e.g. a called "3") contributes misses to hit/placed but no
+marquee slots. `exact_calls` subsumes opener/closer positions — the badge is
+about ordering, the marquee flags are the story stats.
+
+**Version scoring** (`versions`): every PRIOR frozen take is scored with the
+same machinery, oldest first — the top-level source entry IS the final take
+(the official benchmark; scoreboard aggregates use only it):
+```json
+[{"submitted_at": "...", "after_showdate": "2026-07-11" | null,  // latest played showdate this take could know
+  "metrics": { ...same shape... }, "setlist_score": { ...same shape... } | null,
+  "rows": [{"song","slug","prob","hit"}, ...]}]
+```
+`after_showdate` is a UI labeling heuristic, not a metric: the latest played
+showdate S with S < min(UTC date of submitted_at, this showdate) and S within
+the 10 days before this show (runs never gap longer); null -> "pre-run". A
+mid-show submission (UTC date already past S) counts S as known — acceptable
+slop, documented here so nobody litigates it later.
+
 ### scorecards/scoreboard.json
 ```json
 {
@@ -420,12 +494,24 @@ phish.net's domain; `phishnet_url` links out.
      "city": "Noblesville", "state": "IN", "n_played": 21,
      "source_keys": ["heuristic", "mcp:claude-fable"]}
   ],
-  "models": {                                // unweighted means over scored shows
+  "models": {                                // unweighted means over scored shows (FINAL takes only)
     "heuristic": {"kind": "statistical", "n_shows": 3, "hit_rate_top10": 0.55,
-                  "recall": 0.41, "brier": 0.09, "log_loss": 0.29}
+                  "recall": 0.41, "brier": 0.09, "log_loss": 0.29,
+                  "setlist": {                       // absent when no setlist-scored shows
+                    "n_shows": 2, "hit_rate": 0.44, "placed_rate": 0.61,
+                    "marquee_calls": 5, "exact_calls": 3, "sharpshooters": 1
+                  },
+                  "refresh_gain": {                  // absent when no multi-take shows; the Monty Hall dividend
+                    "n_shows": 2,                    //   shows with >= 1 prior version
+                    "mean_hit_rate_top10_delta": 0.15,   // mean(final - first take)
+                    "mean_recall_delta": 0.08
+                  }}
   }
 }
 ```
+`setlist.marquee_calls`/`exact_calls`/`sharpshooters` are TOTALS over scored
+shows (they're counting stats); `hit_rate`/`placed_rate` are unweighted means.
+`refresh_gain` compares each show's FIRST take against its final one.
 
 **Workflow wiring** (`.github/workflows/publish.yml`): the restore step also
 pulls `frozen/` → `data/frozen/` and `scorecards/` → `data/scorecards/`; every
