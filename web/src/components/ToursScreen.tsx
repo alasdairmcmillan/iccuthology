@@ -134,20 +134,9 @@ export default function ToursScreen({
 
   return (
     <>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          marginBottom: 18,
-        }}
-      >
-        <span className="screen-title">Tours</span>
-        <span className="mono" style={{ color: "var(--text-muted)", fontSize: 11 }}>
-          MODEL: {tourData.model.toUpperCase()}
-        </span>
-      </div>
-
+      {/* No model label here (yet): tour tables are heuristic-only until
+          per-model tour predictions are wired up — see
+          docs/llm-auto-predictor-plan.md "Per-model tour predictions". */}
       <div className="tour-pills">
         {options.map((o) => (
           <button

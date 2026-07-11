@@ -303,6 +303,152 @@ def test_tool_docstrings_state_run_repeat_ground_rules():
     assert "run" in tools.run_context.__doc__
 
 
+# ---------------------------------------------------------------------------
+# submit_prediction — structured setlist (§5)
+# ---------------------------------------------------------------------------
+
+def test_submit_prediction_writes_setlist(conn, tmp_path):
+    result = tools.submit_prediction(
+        "2026-07-09",
+        "agent-x",
+        [{"slug": "tweezer", "prob": 0.6}],
+        setlist={"sets": {"1": ["tweezer", "yem"], "e": ["wilson"]}},
+        conn=conn,
+        out_dir=tmp_path,
+    )
+    payload = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
+    assert payload["setlist"] == {"sets": {"1": ["tweezer", "yem"], "e": ["wilson"]}}
+    # setlist is independent of predictions; both are present here
+    assert [r["slug"] for r in payload["predictions"]] == ["tweezer"]
+
+
+def test_submit_prediction_setlist_omitted_when_absent(conn, tmp_path):
+    result = tools.submit_prediction(
+        "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+        conn=conn, out_dir=tmp_path,
+    )
+    payload = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
+    assert "setlist" not in payload
+
+
+def test_submit_prediction_setlist_rejects_unknown_slug(conn, tmp_path):
+    with pytest.raises(ValueError, match="unknown slug"):
+        tools.submit_prediction(
+            "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+            setlist={"sets": {"1": ["tweezer", "not-a-song"]}},
+            conn=conn, out_dir=tmp_path,
+        )
+
+
+def test_submit_prediction_setlist_rejects_duplicate_slug(conn, tmp_path):
+    # tweezer appears in two different sets -> duplicate anywhere is rejected.
+    with pytest.raises(ValueError, match="duplicate slug"):
+        tools.submit_prediction(
+            "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+            setlist={"sets": {"1": ["tweezer"], "2": ["tweezer"]}},
+            conn=conn, out_dir=tmp_path,
+        )
+
+
+def test_submit_prediction_setlist_rejects_bad_set_key(conn, tmp_path):
+    with pytest.raises(ValueError, match="invalid set label"):
+        tools.submit_prediction(
+            "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+            setlist={"sets": {"encore": ["wilson"]}},  # must be \d+ or e\d*
+            conn=conn, out_dir=tmp_path,
+        )
+
+
+def test_submit_prediction_setlist_rejects_over_40_songs(conn, tmp_path):
+    # 41 references to the 3 known slugs would first trip the duplicate rule, so
+    # register enough unique slugs to isolate the >40 cap.
+    for i in range(41):
+        conn.execute(
+            "INSERT INTO songs (songid, slug, name, is_original) VALUES (?,?,?,1)",
+            (2000 + i, f"song-{i}", f"Song {i}", ),
+        )
+    conn.commit()
+    with pytest.raises(ValueError, match="max 40"):
+        tools.submit_prediction(
+            "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+            setlist={"sets": {"1": [f"song-{i}" for i in range(41)]}},
+            conn=conn, out_dir=tmp_path,
+        )
+
+
+def test_submit_prediction_setlist_rejects_empty_set(conn, tmp_path):
+    with pytest.raises(ValueError, match="non-empty"):
+        tools.submit_prediction(
+            "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+            setlist={"sets": {"1": []}},
+            conn=conn, out_dir=tmp_path,
+        )
+
+
+# ---------------------------------------------------------------------------
+# submit_prediction — versioning (§5)
+# ---------------------------------------------------------------------------
+
+def test_first_submission_omits_versions_key(conn, tmp_path):
+    result = tools.submit_prediction(
+        "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+        conn=conn, out_dir=tmp_path,
+    )
+    payload = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
+    assert "versions" not in payload  # legacy-shaped output for first submissions
+
+
+def test_resubmission_appends_prior_to_versions(conn, tmp_path):
+    tools.submit_prediction(
+        "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+        rationale="take 1", conn=conn, out_dir=tmp_path,
+        submitted_at="2026-07-08T10:00:00Z",
+    )
+    result = tools.submit_prediction(
+        "2026-07-09", "agent-x", [{"slug": "wilson", "prob": 0.7}],
+        rationale="take 2", conn=conn, out_dir=tmp_path,
+        submitted_at="2026-07-09T10:00:00Z",
+    )
+    payload = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
+    # latest take is the top level
+    assert [r["slug"] for r in payload["predictions"]] == ["wilson"]
+    assert payload["rationale"] == "take 2"
+    # one prior take carried into versions (oldest first), stripped of its own key
+    assert len(payload["versions"]) == 1
+    prior = payload["versions"][0]
+    assert prior["rationale"] == "take 1"
+    assert [r["slug"] for r in prior["predictions"]] == ["tweezer"]
+    assert "versions" not in prior
+
+
+def test_resubmission_keeps_only_10_most_recent_priors(conn, tmp_path):
+    for i in range(12):  # 12 submissions -> the 12th keeps 10 priors (drops 2 oldest)
+        tools.submit_prediction(
+            "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.5}],
+            rationale=f"take {i}", conn=conn, out_dir=tmp_path,
+            submitted_at=f"2026-07-09T{i:02d}:00:00Z",
+        )
+    payload = json.loads((tmp_path / "agent-x" / "2026-07-09.json").read_text(encoding="utf-8"))
+    assert len(payload["versions"]) == 10  # capped
+    # oldest-first ordering; the two oldest (take 0, take 1) were dropped
+    rationales = [v["rationale"] for v in payload["versions"]]
+    assert rationales == [f"take {i}" for i in range(1, 11)]
+    assert payload["rationale"] == "take 11"  # latest
+
+
+def test_resubmission_unreadable_prior_treated_as_no_history(conn, tmp_path, capsys):
+    dest = tmp_path / "agent-x"
+    dest.mkdir(parents=True)
+    (dest / "2026-07-09.json").write_text("{not valid json", encoding="utf-8")
+    result = tools.submit_prediction(
+        "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+        conn=conn, out_dir=tmp_path,
+    )
+    payload = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
+    assert "versions" not in payload  # unparseable prior -> no history
+    assert "treating as no history" in capsys.readouterr().err
+
+
 def test_submit_prediction_honors_explicit_epoch_and_timestamp(conn, tmp_path):
     result = tools.submit_prediction(
         "2026-07-09",

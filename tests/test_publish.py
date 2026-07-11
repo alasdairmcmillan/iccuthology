@@ -342,6 +342,87 @@ def test_fold_scales_down_when_sum_exceeds_k(conn, tmp_path):
     assert all(p < 0.99 for p in probs)               # each below the submitted 0.99
 
 
+def test_fold_carries_setlist_and_versions(conn, tmp_path):
+    inbox = tmp_path / "inbox"
+    _write_submission(inbox, "bot", "2026-07-10", {
+        "model_label": "bot", "showdate": "2026-07-10",
+        "rationale": "take 2",
+        "predictions": [{"slug": "gin", "prob": 0.7}],
+        "setlist": {"sets": {"1": ["tweezer", "gin"], "e": ["wilson"]}},
+        "versions": [
+            {"submitted_at": "2026-07-09T10:00:00Z", "rationale": "take 1",
+             "predictions": [{"slug": "tweezer", "prob": 0.6}],
+             "setlist": {"sets": {"1": ["yem"]}}},
+        ],
+    })
+    out = tmp_path / "snap"
+    publish(conn, out, n_sims=N_SIMS, seed=SEED, submitted_dir=inbox)
+    src = json.loads((out / "show" / "2026-07-10.json").read_text())["sources"]["mcp:bot"]
+
+    # latest setlist resolved to {slug, song} objects
+    assert src["setlist"]["sets"]["1"] == [
+        {"slug": "tweezer", "song": "Tweezer"}, {"slug": "gin", "song": "Bathtub Gin"}
+    ]
+    assert src["setlist"]["sets"]["e"] == [{"slug": "wilson", "song": "Wilson"}]
+
+    # one prior version folded, with its own resolved setlist
+    assert len(src["versions"]) == 1
+    v = src["versions"][0]
+    assert v["rationale"] == "take 1"
+    assert v["submitted_at"] == "2026-07-09T10:00:00Z"
+    assert [r["slug"] for r in v["rows"]] == ["tweezer"]
+    assert v["setlist"]["sets"]["1"] == [{"slug": "yem", "song": "YEM"}]
+
+
+def test_fold_drops_partially_unknown_setlist_wholly(conn, tmp_path):
+    inbox = tmp_path / "inbox"
+    _write_submission(inbox, "bot", "2026-07-10", {
+        "model_label": "bot", "showdate": "2026-07-10",
+        "predictions": [{"slug": "gin", "prob": 0.7}],
+        "setlist": {"sets": {"1": ["tweezer", "not-a-song"]}},  # one unknown slug
+    })
+    out = tmp_path / "snap"
+    publish(conn, out, n_sims=N_SIMS, seed=SEED, submitted_dir=inbox)
+    src = json.loads((out / "show" / "2026-07-10.json").read_text())["sources"]["mcp:bot"]
+    # source still folds (predictions valid), but the whole setlist is dropped
+    assert "setlist" not in src
+    assert [r["slug"] for r in src["rows"]] == ["gin"]
+
+
+def test_fold_drops_invalid_version_individually(conn, tmp_path):
+    inbox = tmp_path / "inbox"
+    _write_submission(inbox, "bot", "2026-07-10", {
+        "model_label": "bot", "showdate": "2026-07-10",
+        "predictions": [{"slug": "gin", "prob": 0.7}],
+        "versions": [
+            {"submitted_at": "t1", "predictions": [{"slug": "gin", "prob": 0.5}, {"slug": "gin", "prob": 0.6}]},  # dup -> drop
+            {"submitted_at": "t2", "predictions": [{"slug": "tweezer", "prob": 0.4}]},  # valid -> keep
+        ],
+    })
+    out = tmp_path / "snap"
+    publish(conn, out, n_sims=N_SIMS, seed=SEED, submitted_dir=inbox)
+    src = json.loads((out / "show" / "2026-07-10.json").read_text())["sources"]["mcp:bot"]
+    # latest still folded; only the valid version survives
+    assert len(src["versions"]) == 1
+    assert src["versions"][0]["submitted_at"] == "t2"
+    assert [r["slug"] for r in src["versions"][0]["rows"]] == ["tweezer"]
+
+
+def test_fold_no_versions_key_when_none_valid(conn, tmp_path):
+    inbox = tmp_path / "inbox"
+    _write_submission(inbox, "bot", "2026-07-10", {
+        "model_label": "bot", "showdate": "2026-07-10",
+        "predictions": [{"slug": "gin", "prob": 0.7}],
+        "versions": [
+            {"submitted_at": "t1", "predictions": [{"slug": "gin", "prob": 0.5}, {"slug": "gin", "prob": 0.6}]},  # dup -> drop
+        ],
+    })
+    out = tmp_path / "snap"
+    publish(conn, out, n_sims=N_SIMS, seed=SEED, submitted_dir=inbox)
+    src = json.loads((out / "show" / "2026-07-10.json").read_text())["sources"]["mcp:bot"]
+    assert "versions" not in src  # every version dropped -> no key
+
+
 def test_samples_meta_has_horizon_showids(conn, tmp_path):
     publish(conn, tmp_path, n_sims=N_SIMS, seed=SEED, with_samples=True)
     smeta = json.loads((tmp_path / "samples_meta.json").read_text())
