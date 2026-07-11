@@ -201,3 +201,56 @@ def test_report_renders_with_model_names():
     assert "Brier" in text and "Hit@20" in text and "Calibration" in text
     # __str__ delegates to render.
     assert str(report) == text
+
+
+# --------------------------------------------------------------------------- #
+# Notebook baseline wiring
+# --------------------------------------------------------------------------- #
+def test_model_names_includes_notebook_first():
+    assert backtest.MODEL_NAMES == ["notebook", "heuristic", "lr", "gbm"]
+
+
+class _FakeCalibratedModel:
+    """Minimal stand-in for a trained CalibratedSongModel (see models/ml.py)."""
+
+    name = "fake"
+
+    def predict_scores(self, df: pd.DataFrame) -> np.ndarray:
+        return np.full(len(df), 0.1, dtype=float)
+
+
+def test_predict_holdout_dispatches_notebook_alongside_other_models():
+    from phishpred.features import FEATURE_COLUMNS
+
+    base = {col: 0.0 for col in FEATURE_COLUMNS}
+    base.update({
+        "gap": 10,
+        "gap_ratio": 1.0,
+        "venue_gap": 999,
+        "plays_last_50": 5,
+        "is_original": 1,
+    })
+
+    def make_row(**overrides):
+        row = dict(base)
+        row.update(overrides)
+        return row
+
+    holdout_df = pd.DataFrame([
+        {**make_row(), "showid": 1, "showdate": "2019-01-01", "show_index": 0, "songid": 1, "y": 1},
+        {**make_row(), "showid": 1, "showdate": "2019-01-01", "show_index": 0, "songid": 2, "y": 0},
+        {**make_row(gap=1), "showid": 1, "showdate": "2019-01-01", "show_index": 0, "songid": 3, "y": 0},
+    ])
+
+    models = {"lr": _FakeCalibratedModel(), "gbm": _FakeCalibratedModel()}
+    preds = backtest.predict_holdout(models, holdout_df, k_for_year=lambda year: 2.0)
+
+    assert set(preds.keys()) == {"notebook", "heuristic", "lr", "gbm"}
+    for name, pdf in preds.items():
+        assert "prob" in pdf.columns
+        assert len(pdf) == len(holdout_df)
+
+    # Notebook must hard-exclude the gap=1 row (cooldown), unlike heuristic/lr/gbm
+    # which only down-weight it.
+    notebook_pdf = preds["notebook"].set_index("songid")
+    assert notebook_pdf.loc[3, "score"] == pytest.approx(0.0)

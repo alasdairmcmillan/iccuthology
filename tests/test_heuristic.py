@@ -6,7 +6,12 @@ import pandas as pd
 import pytest
 
 from phishpred.features import FEATURE_COLUMNS
-from phishpred.models.heuristic import heuristic_predict, heuristic_scores
+from phishpred.models.heuristic import (
+    COOLDOWN_GAP2,
+    COOLDOWN_GAP3,
+    heuristic_predict,
+    heuristic_scores,
+)
 
 DEFAULTS = {
     "decayed_rate": 0.1,
@@ -92,6 +97,69 @@ def test_in_run_not_double_penalized_with_prev_show():
     # not an additional 0.05 stacked on top.
     expected_score = row["decayed_rate"] * 0.02 * 1.0 * row["m_venue"] * row["m_due"]
     assert row["score"] == pytest.approx(expected_score)
+
+
+# ---------------------------------------------------------------------------
+# Cross-run cooldown multiplier (m_cooldown)
+# ---------------------------------------------------------------------------
+
+def test_m_cooldown_fires_for_cross_run_gap_2_and_3():
+    """m_cooldown = COOLDOWN_GAP2 at gap==2 and COOLDOWN_GAP3 at gap==3 for
+    cross-run rows (not prev-show, not in-run)."""
+    df = make_df([
+        {"gap": 2, "played_prev_show": 0, "played_in_run": 0},
+        {"gap": 3, "played_prev_show": 0, "played_in_run": 0},
+    ])
+    result = heuristic_scores(df)
+    assert result.loc[0, "m_cooldown"] == pytest.approx(COOLDOWN_GAP2)
+    assert result.loc[1, "m_cooldown"] == pytest.approx(COOLDOWN_GAP3)
+
+
+def test_m_cooldown_does_not_fire_outside_gap_2_3():
+    """Other cross-run gaps (1 handled by prev_show, 4+, etc.) leave m_cooldown at 1.0."""
+    df = make_df([
+        {"gap": 4, "played_prev_show": 0, "played_in_run": 0},
+        {"gap": 10, "played_prev_show": 0, "played_in_run": 0},
+        {"gap": 6, "played_prev_show": 0, "played_in_run": 0},
+    ])
+    result = heuristic_scores(df)
+    assert result["m_cooldown"].to_numpy() == pytest.approx(1.0)
+
+
+def test_m_cooldown_precedence_gap1_excluded():
+    """A gap==1 row (played_prev_show) must get m_cooldown == 1.0 even though its
+    gap is not 2/3 -- prev_show takes exclusive precedence."""
+    df = make_df([{"gap": 1, "played_prev_show": 1, "played_in_run": 0}])
+    result = heuristic_scores(df)
+    assert result.loc[0, "m_prev_show"] == pytest.approx(0.02)
+    assert result.loc[0, "m_cooldown"] == pytest.approx(1.0)
+
+
+def test_m_cooldown_precedence_in_run_excluded():
+    """An in-run row at gap 2/3 must get m_cooldown == 1.0 -- in_run takes
+    exclusive precedence, no double penalty with cooldown."""
+    df = make_df([
+        {"gap": 2, "played_prev_show": 0, "played_in_run": 1},
+        {"gap": 3, "played_prev_show": 0, "played_in_run": 1},
+    ])
+    result = heuristic_scores(df)
+    assert result.loc[0, "m_in_run"] == pytest.approx(0.05)
+    assert result.loc[0, "m_cooldown"] == pytest.approx(1.0)
+    assert result.loc[1, "m_in_run"] == pytest.approx(0.05)
+    assert result.loc[1, "m_cooldown"] == pytest.approx(1.0)
+
+
+def test_score_includes_m_cooldown_factor():
+    """The score column multiplies through m_cooldown for a cross-run gap==2 row."""
+    df = make_df([
+        {"gap": 2, "played_prev_show": 0, "played_in_run": 0,
+         "decayed_rate": 0.3, "venue_gap": 999, "gap_ratio": 1.0},
+    ])
+    result = heuristic_scores(df)
+    row = result.loc[0]
+    assert row["m_cooldown"] == pytest.approx(COOLDOWN_GAP2)
+    # base=0.3, m_prev_show=1, m_in_run=1, m_venue=1, m_due=1 -> score = 0.3 * cooldown
+    assert row["score"] == pytest.approx(0.3 * COOLDOWN_GAP2)
 
 
 def test_m_venue_multiplier():
@@ -249,8 +317,8 @@ def test_score_arithmetic_hand_computed():
 def test_heuristic_scores_returns_new_columns():
     df = make_df([{}])
     result = heuristic_scores(df)
-    for col in ("recent_rate", "w_recent", "m_prev_show", "m_in_run", "m_venue",
-                "m_due", "score"):
+    for col in ("recent_rate", "w_recent", "m_prev_show", "m_in_run", "m_cooldown",
+                "m_venue", "m_due", "score"):
         assert col in result.columns
 
 
