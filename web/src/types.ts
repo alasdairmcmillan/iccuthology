@@ -52,6 +52,19 @@ export interface TourRow {
   gap_ratio?: number;
   analytic_p: number;
 }
+// Per-tour "plays-so-far" tracker (DEPLOY-CONTRACTS §3). Present on per-tour
+// docs (/api/tour/{id}); absent on the all-future tour.json. Time-varying —
+// refreshed every publish, never part of the frozen prediction.
+export interface TourTracker {
+  /** indexed (played) shows in this tour so far */
+  n_shows_played: number;
+  /** all non-excluded shows in the tour */
+  n_shows_total: number;
+  /** slug -> # played tour shows featuring it (distinct per show) */
+  played_counts: Record<string, number>;
+  /** = meta.created_at */
+  as_of: string;
+}
 export interface TourReport {
   epoch: string;
   horizon_showdates: string[];
@@ -59,6 +72,12 @@ export interface TourReport {
   n_sims: number;
   half_life: number;
   rows: TourRow[];
+  /** §3 plays-so-far tracker (per-tour docs only). */
+  tracker?: TourTracker;
+  /** true when `rows` are frozen pre-tour backcast predictions. */
+  backcast?: boolean;
+  /** last pre-tour played showdate the backcast knew (backcast docs only). */
+  as_of_showdate?: string;
 }
 
 // GET /api/show/{showdate} -> show/{showdate}.json  (multi-source)

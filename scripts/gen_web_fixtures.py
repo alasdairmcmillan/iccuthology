@@ -37,6 +37,18 @@ def main() -> None:
     tour = load("tour.json")
     tour["rows"] = tour["rows"][:TOUR_TOP]
 
+    # The offline preview's Tours screen renders per-tour docs (fetchTourById ->
+    # genTour), so carry the primary (first has-data) tour's freeze-once tracker
+    # + backcast metadata onto genTour — otherwise the "So far" column and the
+    # frozen caption have nothing to read (DEPLOY-CONTRACTS §3). The all-future
+    # tour.json itself carries none of these.
+    primary = next((t["id"] for t in meta.get("tours", []) if t.get("has_data")), None)
+    if primary and (snap / "tour" / f"{primary}.json").exists():
+        per_tour = load(f"tour/{primary}.json")
+        for key in ("tracker", "backcast", "as_of_showdate"):
+            if key in per_tour:
+                tour[key] = per_tour[key]
+
     shows: dict[str, dict] = {}
     setlists: dict[str, dict] = {}
     for s in schedule["shows"]:

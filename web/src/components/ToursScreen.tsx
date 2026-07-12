@@ -177,6 +177,9 @@ export default function ToursScreen({
                     ? distBuckets(tourData.rows[0].dist).join("/")
                     : "0/1/2/3/4+"}
                 </span>
+                <span className="th-sofar" style={{ textAlign: "center" }}>
+                  So far
+                </span>
               </div>
               {tourData.rows
                 .slice(songPage * songPageRows, (songPage + 1) * songPageRows)
@@ -187,6 +190,10 @@ export default function ToursScreen({
                     .map((k) => Math.round(r.dist[k] * 100))
                     .join("/") + "%";
                 const ml = mostLikelyPlays(r.dist);
+                // "So far" — actual plays of this song on the tour to date, from
+                // the frozen doc's tracker (per-tour docs only; the all-future
+                // "all" pill has none). 0 renders as a dim em-dash.
+                const soFar = tourData.tracker?.played_counts[r.slug] ?? 0;
                 return (
                   <div className="tour-grid-row" key={r.slug}>
                     <span className="r-song">{r.song}</span>
@@ -223,6 +230,9 @@ export default function ToursScreen({
                       </ul>
                     </StatPopover>
                     <span className="r-dist">{dist}</span>
+                    <span className={"r-sofar" + (soFar > 0 ? " played" : " zero")}>
+                      {soFar > 0 ? soFar : "—"}
+                    </span>
                   </div>
                 );
                 })}
@@ -234,8 +244,20 @@ export default function ToursScreen({
               onPage={setSongPage}
             />
             <div className="cli-caption">
-              Estimated from {tourData.n_sims.toLocaleString()} Monte-Carlo simulations of{" "}
-              {tourId === "all" ? "all future shows" : selected.label} · {tourData.model} model
+              {tourData.tracker ? (
+                <>
+                  {tourData.backcast ? "Frozen pre-tour " : "Frozen "}
+                  {tourData.model} predictions from {tourData.n_sims.toLocaleString()}{" "}
+                  Monte-Carlo simulations · actual plays tracked as of{" "}
+                  {tourData.tracker.as_of.slice(0, 10)} ({tourData.tracker.n_shows_played}/
+                  {tourData.tracker.n_shows_total} shows played)
+                </>
+              ) : (
+                <>
+                  Estimated from {tourData.n_sims.toLocaleString()} Monte-Carlo simulations of{" "}
+                  {tourId === "all" ? "all future shows" : selected.label} · {tourData.model} model
+                </>
+              )}
             </div>
           </div>
 

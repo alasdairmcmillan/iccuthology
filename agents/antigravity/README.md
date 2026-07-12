@@ -11,7 +11,10 @@ however you like — subfolders, a `notes.md`, whatever works.
 1. **Write only inside this folder.** Never modify `phishpred` source,
    tests, contracts, docs, workflows, or other agents' workspaces. If you
    think core code should change, write up the proposal here (e.g.
-   `proposals/…md`) and the human will review it.
+   `proposals/…md`) and the human will review it. One carveout: your
+   harness's own root-level config file (e.g. `GEMINI.md` — the file your
+   harness auto-loads, like `CLAUDE.md`/`AGENTS.md`) may live at the repo
+   root and is yours to maintain; everything else at root stays off-limits.
 2. **The repo may not depend on you.** Nothing under `src/`, `tests/`,
    `worker/`, or `web/` may import or invoke code in this folder. Your
    scripts may freely import `phishpred` the other way.

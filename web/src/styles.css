@@ -1050,6 +1050,14 @@ a:hover {
   border-style: dashed;
   background: var(--accent-a18);
 }
+/* Chips the selected model's shortlist called — solid accent + leading ✓,
+   distinct from the dashed missed-by-all treatment without a second hue. */
+.played-chip.hit {
+  color: var(--accent);
+  border-color: var(--accent-a55);
+  background: var(--accent-a18);
+  font-weight: 600;
+}
 .chip-x {
   margin-right: 5px;
   font-weight: 700;
@@ -1603,5 +1611,41 @@ a:hover {
 @media (max-width: 640px) {
   .shows-card {
     min-width: 0;
+  }
+}
+
+/* --- Tours "So far" tracker column (frozen predictions + actual plays this
+   tour, DEPLOY-CONTRACTS §3). Appended: adds a 6th track to the tour grid and
+   styles the per-song play-count cell. --------------------------------------- */
+.tour-grid-head,
+.tour-grid-row {
+  grid-template-columns:
+    minmax(150px, 2.2fr) minmax(100px, 1fr) minmax(64px, 0.8fr)
+    minmax(96px, 0.9fr) minmax(104px, 1fr) minmax(52px, 0.55fr);
+}
+.r-sofar {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  text-align: center;
+  justify-self: center;
+}
+/* 0 plays: dim em-dash; >=1: emphasized like the P(≥1) accent column. */
+.r-sofar.zero {
+  color: var(--text-tertiary);
+}
+.r-sofar.played {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+/* Mobile: same collapse as P(≥1)/Dist — drop "So far" and keep the 3-col grid. */
+@media (max-width: 640px) {
+  .tour-grid-head .th-sofar,
+  .tour-grid-row .r-sofar {
+    display: none;
+  }
+  .tour-grid-head,
+  .tour-grid-row {
+    grid-template-columns: minmax(0, 1fr) 60px 92px;
   }
 }
