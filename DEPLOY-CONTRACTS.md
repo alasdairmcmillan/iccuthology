@@ -448,6 +448,11 @@ lists are valid). The played set is the show's DISTINCT performed slugs.
 ```
 Metrics are computed over each source's own shortlist rows only — shortlists
 differ in length across sources (`n_rows` is published so the UI can caveat).
+Scoring caps every source at its top 40 rows (the §5 submission ceiling):
+statistical sources' frozen docs carry their full candidate ranking for the
+UI, and scoring all of it would make recall trivially 1.0, dilute Brier with
+the low-prob tail, and empty `missed_by_all`. The cap applies to prior
+versions and the `missed_by_all` union too.
 The scorecard embeds everything the UI needs; readers never re-fetch frozen
 artifacts. Boundary: this tier stores OUR predictions and a flat played-song
 list for hit/miss context — full setlists (sets, segues, jamcharts) remain

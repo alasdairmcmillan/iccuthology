@@ -33,6 +33,12 @@ from .modes import _round_floats
 # Metrics look at the first N rows for the "top-N" family (§8). Rows in a frozen
 # source are already prob-descending; we preserve that order.
 _TOP_N = 20
+# A source is scored over at most this many of its top rows — the same ceiling
+# submit_prediction enforces (§5). Statistical sources' frozen docs carry their
+# FULL candidate ranking (hundreds of rows) for the UI; scoring all of it makes
+# recall trivially 1.0 and dilutes Brier with the low-prob tail, so every source
+# is capped to the same 40-row footing the submitted shortlists live under.
+_MAX_SCORED_ROWS = 40
 # log_loss probability clamp so an all-in 0/1 prediction can't blow up to inf.
 _LOG_LOSS_CLAMP = (0.001, 0.999)
 # A prior take's `after_showdate` only reaches back this many days — runs never
@@ -232,7 +238,7 @@ def _score_source(src: dict[str, Any], played_slugs: set[str],
     scored prior versions). ``mcp`` sources keep their frozen
     ``rationale``/``submitted_at`` verbatim.
     """
-    scored_rows = _annotate_rows(src.get("rows") or [], played_slugs)
+    scored_rows = _annotate_rows((src.get("rows") or [])[:_MAX_SCORED_ROWS], played_slugs)
     metrics = _metrics(scored_rows, played_slugs)
 
     # best_call = hit with the LOWEST prob; biggest_whiff = miss with the
@@ -274,7 +280,7 @@ def _score_source(src: dict[str, Any], played_slugs: set[str],
     versions = src.get("versions") or []
     scored_versions: list[dict[str, Any]] = []
     for v in versions:
-        v_rows = _annotate_rows(v.get("rows") or [], played_slugs)
+        v_rows = _annotate_rows((v.get("rows") or [])[:_MAX_SCORED_ROWS], played_slugs)
         v_setlist = v.get("setlist")
         scored_versions.append({
             "submitted_at": v.get("submitted_at"),
@@ -316,7 +322,9 @@ def score_show(
     all_shortlist: set[str] = set()
     for key, src in (frozen_payload.get("sources") or {}).items():
         sources_out[key] = _score_source(src, played_slugs, played_by_set, showdate, played_showdates)
-        all_shortlist |= {r.get("slug") for r in (src.get("rows") or [])}
+        # Same 40-row cap as _score_source: a statistical source's full ranking
+        # would otherwise make missed_by_all trivially empty.
+        all_shortlist |= {r.get("slug") for r in (src.get("rows") or [])[:_MAX_SCORED_ROWS]}
 
     # Played songs that appeared in NO source's shortlist (preserve setlist order).
     missed_by_all = [
