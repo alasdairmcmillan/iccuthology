@@ -11,4 +11,6 @@ dist/
 build/
 node_modules/
 data/predictions/submitted/
+data/frozen/
+data/scorecards/
 tmp/
