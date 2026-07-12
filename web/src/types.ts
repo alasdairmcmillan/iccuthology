@@ -181,6 +181,10 @@ export interface ScoreboardModelSetlist {
   n_shows: number;
   hit_rate: number;
   placed_rate: number;
+  /** OPTIONAL: unweighted mean of per-show weighted_score. Absent on legacy
+   *  artifacts written before the weighted benchmark (can't be reconstructed
+   *  from the aggregate) — the UI renders "—" for it. */
+  weighted_score?: number;
   marquee_calls: number;
   exact_calls: number;
   sharpshooters: number;
@@ -189,18 +193,28 @@ export interface ScoreboardModelSetlist {
 // when no multi-take shows for this model).
 export interface ScoreboardModelRefreshGain {
   n_shows: number;
-  mean_hit_rate_top10_delta: number;
+  mean_hit_rate_top20_delta: number;
   mean_recall_delta: number;
+}
+// §8 head-to-head against the statistical baseline over the SAME scored shows
+// (absent for the heuristic entry itself — it is the baseline).
+export interface ScoreboardModelVsHeuristic {
+  n_shows: number;
+  hit_rate_top20_delta: number;
+  recall_delta: number;
 }
 export interface ScoreboardModel {
   kind: "statistical" | "llm" | "mcp";
   n_shows: number;
-  hit_rate_top10: number;
+  hit_rate_top20: number;
   recall: number;
   brier: number;
   log_loss: number;
+  /** mean shortlist length submitted over scored shows (20–40 allowed). */
+  avg_n_rows: number;
   setlist?: ScoreboardModelSetlist;
   refresh_gain?: ScoreboardModelRefreshGain;
+  vs_heuristic?: ScoreboardModelVsHeuristic;
 }
 export interface Scoreboard {
   updated_at: string;
@@ -216,8 +230,12 @@ export interface ScoredSong {
   song: string;
 }
 export interface ScorecardMetrics {
-  hits_top10: number;
-  hit_rate_top10: number;
+  /** Size of the hit-rate window: how many top-ranked rows it covers (20
+   *  today). Legacy artifacts predate the field and are normalized to 10 on
+   *  ingest (see api.ts), so labels render "top 10" for them. */
+  top_n: number;
+  hits_top20: number;
+  hit_rate_top20: number;
   recall: number;
   brier: number;
   log_loss: number;
@@ -242,6 +260,8 @@ export interface ScorecardSetlistSong {
   song: string;
   hit: boolean;
   placed: boolean;
+  /** predicted (set, position) == actual (set, position); exact ⊆ placed ⊆ hit. */
+  exact: boolean;
 }
 export interface ScorecardSetlistMarquee {
   opener?: boolean;
@@ -261,6 +281,8 @@ export interface ScorecardSetlistScore {
   hit_rate: number;
   placed: number;
   placed_rate: number;
+  /** (hits + placed + exact_calls) / (3 * n_songs); tiers hit/placed/exact. */
+  weighted_score: number;
   marquee: ScorecardSetlistMarquee;
   marquee_calls: number;
   exact_calls: number;

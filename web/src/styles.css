@@ -9,6 +9,19 @@
   --accent-a55: #9d8cf555;
   --accent-a66: #9d8cf566;
 
+  /* Exact-slot highlight — GOLD, distinct from the violet accent so an exact
+     (right song, right set, right slot) call reads as the top tier above a
+     mere "right set" placement. */
+  --gold: #e8c15a;
+  --gold-a18: #e8c15a18;
+  --gold-a55: #e8c15a55;
+
+  /* Signed-delta semantics (vs-heuristic, improvement arc): green up / red
+     down. Kept distinct from the violet accent so "beat the baseline" reads
+     unambiguously in both the scorecard and the standings. */
+  --pos: #5ac59a;
+  --neg: #e5736f;
+
   --bg-page: #0a0e12;
   --bg-card: #0e1318;
   --grid: #131a20;
@@ -251,6 +264,31 @@ a:hover {
   font-size: 11px;
   font-family: var(--font-mono);
   margin-top: 14px;
+}
+/* The model's own narrative — a prominent quote block (accent rule + tinted
+   background) leading the scorecard band and the upcoming setlist card. */
+.rationale {
+  margin: 14px 0 2px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--accent-a55);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--accent-a18);
+}
+.rationale-kicker {
+  display: block;
+  font-size: 9px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.rationale-body {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+  font-style: italic;
 }
 .badge {
   font-size: 10px;
@@ -849,6 +887,55 @@ a:hover {
   font-size: 10px;
   font-family: var(--font-mono);
 }
+/* Signed per-show metric (vs heuristic) — green up / red down. */
+.metric-value.pos {
+  color: var(--pos);
+}
+.metric-value.neg {
+  color: var(--neg);
+}
+
+/* Full-width scores band at the top of a past scorecard (parallels Upcoming). */
+.scores-band {
+  width: 100%;
+  margin-bottom: 20px;
+  padding: 22px 24px;
+}
+/* A labelled cluster of metrics (Shortlist / Setlist call) within the band. */
+.metric-group {
+  margin-top: 18px;
+}
+.metric-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.metric-group-label {
+  color: var(--text-label);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+.metric-group-head .metric-group-label {
+  margin-bottom: 0;
+}
+/* A metric/column label that reveals a definition on hover/tap. Inherits the
+   label styling of whatever context it sits in (metric strip or head row). */
+.tip-label {
+  cursor: help;
+  border-bottom: 1px dotted var(--text-tertiary);
+}
+.metric .tip-label {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 
 .callouts {
   display: flex;
@@ -955,10 +1042,18 @@ a:hover {
   border-radius: 4px;
   padding: 4px 8px;
 }
+/* "Predicted by nobody" chips — accent + dashed border + a leading × so they
+   read as a distinct category without relying on color alone. */
 .played-chip.miss {
   color: var(--accent);
   border-color: var(--accent-a55);
+  border-style: dashed;
   background: var(--accent-a18);
+}
+.chip-x {
+  margin-right: 5px;
+  font-weight: 700;
+  opacity: 0.85;
 }
 
 /* Metrics strip drops to 2 columns on narrow viewports. */
@@ -1015,6 +1110,13 @@ a:hover {
   color: var(--accent);
   font-weight: 700;
 }
+/* Final-take value colored by direction vs. the first take. */
+.improvement-line .imp-value.imp-up {
+  color: var(--pos);
+}
+.improvement-line .imp-value.imp-down {
+  color: var(--neg);
+}
 /* A small "revision available" note near the upcoming-mode model picker. */
 .rev-badge {
   font-family: var(--font-mono);
@@ -1050,6 +1152,10 @@ a:hover {
 .setlist-mark.hit-only {
   color: var(--text-secondary);
 }
+/* Exact slot — brightest tier, gold to match the exact-slot tag. */
+.setlist-mark.exact {
+  color: var(--gold);
+}
 .setlist-name {
   flex: 1;
   color: var(--text-primary);
@@ -1066,6 +1172,21 @@ a:hover {
   color: var(--accent);
   border: 1px solid var(--accent-a55);
   background: var(--accent-a18);
+  border-radius: 4px;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+/* Exact-slot tag — gold, brighter than the violet placed tag so it reads as
+   the top tier (right song, right set, right slot). */
+.setlist-exact-tag {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--gold);
+  border: 1px solid var(--gold-a55);
+  background: var(--gold-a18);
   border-radius: 4px;
   padding: 2px 6px;
   flex-shrink: 0;
@@ -1109,10 +1230,13 @@ a:hover {
 }
 .standings-grid {
   display: grid;
-  grid-template-columns: 1.3fr 0.9fr 0.6fr 0.8fr 0.8fr 0.9fr 0.8fr 0.7fr 1.2fr;
+  /* Model | Kind | Shows | Hit·20 | Recall | Brier | List | vs heur |
+     Setlist | Placed | Sharp | Refresh gain */
+  grid-template-columns:
+    1.3fr 0.85fr 0.55fr 0.7fr 0.7fr 0.6fr 0.55fr 0.75fr 0.7fr 0.7fr 0.55fr 1.1fr;
   gap: 8px;
   align-items: center;
-  min-width: 760px;
+  min-width: 1040px;
 }
 .standings-head {
   padding: 0 10px 8px;
@@ -1141,6 +1265,46 @@ a:hover {
   color: var(--accent);
   font-weight: 700;
   text-align: right;
+}
+/* Signed vs-heuristic delta cell — green when the model beat the baseline. */
+.standings-delta {
+  text-align: right;
+  font-weight: 700;
+}
+.standings-delta.pos {
+  color: var(--pos);
+}
+.standings-delta.neg {
+  color: var(--neg);
+}
+/* Click-to-sort column header — a borderless button that inherits the head
+   row's mono/label styling. The active column takes the accent + a caret. */
+.standings-head .th-sort {
+  justify-self: end;
+}
+.standings-th {
+  appearance: none;
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: right;
+}
+.standings-th:hover {
+  color: var(--text-primary);
+}
+.standings-th[aria-sort="ascending"],
+.standings-th[aria-sort="descending"] {
+  color: var(--accent);
+}
+.standings-th:focus-visible {
+  outline: none;
+  color: var(--accent);
 }
 
 /* --- About -------------------------------------------------------------- */

@@ -10,6 +10,7 @@ import type {
   ScorecardSetlistMarquee,
   ScorecardSetlistScore,
   Scoreboard,
+  ScoreboardModel,
   Scorecard,
   ScorecardSource,
   SetlistPrediction,
@@ -18,6 +19,7 @@ import type {
 import { dateLabel, dateLabelDay, dateLabelShort, pct, pct1 } from "../lib/format";
 import { songPageSize } from "../lib/paging";
 import Pager from "./Pager";
+import StatPopover from "./StatPopover";
 
 interface ShowsScreenProps {
   meta: Meta;
@@ -122,6 +124,92 @@ function formatSignedPct(x: number): string {
   return (x >= 0 ? "+" : "") + pct(x);
 }
 
+// Centralized metric-definition copy, reused by the scores-band metric labels
+// and the standings column headers (§8). "top N" renders from metrics.top_n
+// via hitRateTip() where a card knows its window; the scoreboard carries no
+// per-model top_n so its Hit column tip uses the current 20.
+const METRIC_TIPS = {
+  recall:
+    "Of the songs actually played, the share that appeared anywhere in the model's full shortlist. Longer shortlists (20–40 allowed) make this easier — read it next to the list length.",
+  brier:
+    "Mean squared error between each shortlist probability and the outcome (1 = played, 0 = not). Rewards calibration: a confident miss costs far more than a hedged one. 0 is perfect; always guessing 50% scores 0.25.",
+  vsHeuristic:
+    "This model's top-20 hit rate minus the statistical baseline's on the same shows — positive means it beat the baseline.",
+  list: "Average shortlist length submitted (20–40 allowed). Context for recall: longer lists cover more.",
+  setlistWeighted:
+    "Each called song: 1 point for playing at all, +1 for the right set, +1 for the exact slot. 100% = every called song in its exact slot.",
+  setlistHitRate: "Share of songs in the called setlist that played anywhere in the show.",
+  placedRate: "Of the called songs that played, the share the model put in the correct set.",
+  exactCalls: "Right song, right set, right slot.",
+  refreshGain:
+    "Mean change in top-20 hit rate from a model's first take to its final take, over shows with multiple takes.",
+  shows: "Scored shows this model has a frozen, scored take for.",
+  sharp: "Shows where the model landed 2+ exact calls (right song, right set, right slot).",
+} as const;
+
+function hitRateTip(topN: number): string {
+  return `Of the model's ${topN} highest-probability songs, the share that actually played — anywhere in the show, any set. With ~18 songs in a typical show, a perfect 20-song list tops out near 90%.`;
+}
+
+// A metric/column label that reveals its definition on hover/tap (StatPopover).
+function TipLabel({
+  text,
+  tip,
+  className,
+}: {
+  text: string;
+  tip: string;
+  className?: string;
+}) {
+  return (
+    <StatPopover
+      triggerClassName={className}
+      trigger={<span className="tip-label">{text}</span>}
+    >
+      <div className="stat-pop-line">{tip}</div>
+    </StatPopover>
+  );
+}
+
+// Sortable standings columns (numeric only — Model/Kind are not sortable).
+type SortCol =
+  | "n_shows"
+  | "hit_rate_top20"
+  | "recall"
+  | "brier"
+  | "avg_n_rows"
+  | "vs_heuristic"
+  | "setlist_hit_rate"
+  | "placed_rate"
+  | "sharpshooters"
+  | "refresh_gain";
+
+// Numeric sort key for a model row; null (missing metric) always sorts last.
+function standingsSortValue(m: ScoreboardModel, col: SortCol): number | null {
+  switch (col) {
+    case "n_shows":
+      return m.n_shows;
+    case "hit_rate_top20":
+      return m.hit_rate_top20;
+    case "recall":
+      return m.recall;
+    case "brier":
+      return m.brier;
+    case "avg_n_rows":
+      return m.avg_n_rows;
+    case "vs_heuristic":
+      return m.vs_heuristic ? m.vs_heuristic.hit_rate_top20_delta : null;
+    case "setlist_hit_rate":
+      return m.setlist ? m.setlist.hit_rate : null;
+    case "placed_rate":
+      return m.setlist ? m.setlist.placed_rate : null;
+    case "sharpshooters":
+      return m.setlist ? m.setlist.sharpshooters : null;
+    case "refresh_gain":
+      return m.refresh_gain ? m.refresh_gain.mean_hit_rate_top20_delta : null;
+  }
+}
+
 // One "take" of a scorecard source's own metrics/rows/setlist call — either
 // the final (top-level) take or a prior version, normalized to the same
 // shape so the rest of the render doesn't care which is selected (§8).
@@ -163,6 +251,12 @@ export default function ShowsScreen({
   // Which take of the active source is shown — "final" (the top-level,
   // official-benchmark entry) or a prior version's index (§8 versioning).
   const [versionSel, setVersionSel] = useState<number | "final">("final");
+  // Standings sort — numeric columns only; default hit_rate_top20 desc.
+  const [sortCol, setSortCol] = useState<SortCol>("hit_rate_top20");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  // Pager for the (30–40 row) frozen shortlist in past mode.
+  const [shortlistPage, setShortlistPage] = useState(0);
+  const [shortlistPageRows] = useState(songPageSize);
 
   // Dismiss the night picker on outside click or Escape.
   useEffect(() => {
@@ -271,6 +365,12 @@ export default function ShowsScreen({
     setVersionSel("final");
   }, [activePastDate, activePastModel]);
 
+  // Reset the shortlist pager whenever the show, model, or take changes so a
+  // 30–40 row list never opens mid-way through.
+  useEffect(() => {
+    setShortlistPage(0);
+  }, [activePastDate, activePastModel, versionSel]);
+
   // Normalize the currently-selected take (final or a prior version, §8) to
   // one shape so metrics/callouts/rows/setlist-card below render identically
   // either way.
@@ -302,6 +402,86 @@ export default function ShowsScreen({
   const marqueeBadges = shownTake?.setlistScore
     ? marqueeBadgeLabels(shownTake.setlistScore.marquee)
     : [];
+
+  // Per-show "vs heuristic": this take's top-20 hit rate minus the heuristic
+  // source's FINAL hit rate on the same scorecard (§8, computed client-side).
+  // Undefined when viewing the heuristic itself or the show has no heuristic
+  // source — the metrics strip then falls back to the log-loss slot.
+  const heuristicSource = activeScorecard?.sources.heuristic ?? null;
+  const vsHeuristicDelta =
+    shownTake && heuristicSource && activePastModel !== "heuristic"
+      ? shownTake.metrics.hit_rate_top20 - heuristicSource.metrics.hit_rate_top20
+      : null;
+
+  // Slugs no source shortlisted — marked inline on the actual-setlist chips
+  // (dashed + ×) instead of a separate "predicted by nobody" section.
+  const missedByAllSlugs = useMemo(
+    () => new Set((activeScorecard?.missed_by_all ?? []).map((s) => s.slug)),
+    [activeScorecard],
+  );
+  const playedChip = (s: { slug: string; song: string }) =>
+    missedByAllSlugs.has(s.slug) ? (
+      <span className="played-chip miss" key={s.slug} title="predicted by nobody">
+        <span className="chip-x" aria-hidden="true">
+          ×
+        </span>
+        {s.song}
+      </span>
+    ) : (
+      <span className="played-chip" key={s.slug}>
+        {s.song}
+      </span>
+    );
+
+  // Standings sorted by the selected column; nulls last, direction toggled.
+  const sortedModels = useMemo(() => {
+    if (!scoreboard) return [];
+    const entries = Object.entries(scoreboard.models);
+    const sign = sortDir === "asc" ? 1 : -1;
+    return entries.sort(([, a], [, b]) => {
+      const va = standingsSortValue(a, sortCol);
+      const vb = standingsSortValue(b, sortCol);
+      if (va === null && vb === null) return 0;
+      if (va === null) return 1; // missing always last
+      if (vb === null) return -1;
+      return (va - vb) * sign;
+    });
+  }, [scoreboard, sortCol, sortDir]);
+
+  const onSort = (col: SortCol) => {
+    if (col === sortCol) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortCol(col);
+      setSortDir("desc");
+    }
+  };
+  const ariaSort = (col: SortCol): "ascending" | "descending" | "none" =>
+    col === sortCol ? (sortDir === "asc" ? "ascending" : "descending") : "none";
+  const sortCaret = (col: SortCol): string =>
+    col === sortCol ? (sortDir === "asc" ? " ▲" : " ▼") : "";
+
+  // A right-aligned, click-to-sort standings header whose label reveals its
+  // definition on hover/tap (StatPopover). The button is the popover trigger,
+  // so a click both sorts and (harmlessly) toggles the tip.
+  const sortHeader = (col: SortCol, label: string, tip: string) => (
+    <StatPopover
+      triggerClassName="th-sort"
+      trigger={
+        <button
+          type="button"
+          className="standings-th"
+          aria-sort={ariaSort(col)}
+          onClick={() => onSort(col)}
+        >
+          {label}
+          {sortCaret(col)}
+        </button>
+      }
+    >
+      <div className="stat-pop-line">{tip}</div>
+    </StatPopover>
+  );
 
   // Keep the setlist night valid (first data-having selected night).
   const activeNight =
@@ -523,6 +703,13 @@ export default function ShowsScreen({
                 ))
               ) : (
                 <>
+                  {/* The model's own narrative leads — it frames the picks below. */}
+                  {sourceForNight!.rationale && (
+                    <div className="rationale">
+                      <span className="rationale-kicker">Rationale</span>
+                      <p className="rationale-body">{sourceForNight!.rationale}</p>
+                    </div>
+                  )}
                   {/* A structured setlist call (§2/§5) is a stronger prediction than
                       the flat ranked shortlist — prefer it when present, and keep the
                       shortlist below for the full picture. */}
@@ -547,9 +734,6 @@ export default function ShowsScreen({
                         <span className="set-pct">{pct1(r.prob)}</span>
                       </div>
                     ))}
-                    {sourceForNight!.rationale && (
-                      <div className="note">{sourceForNight!.rationale}</div>
-                    )}
                   </div>
                 </>
               )}
@@ -581,52 +765,70 @@ export default function ShowsScreen({
                   <div className="standings-grid standings-head">
                     <span>Model</span>
                     <span>Kind</span>
-                    <span style={{ textAlign: "right" }}>Shows</span>
-                    <span style={{ textAlign: "right" }}>Hit·10</span>
-                    <span style={{ textAlign: "right" }}>Recall</span>
-                    <span style={{ textAlign: "right" }}>Setlist</span>
-                    <span style={{ textAlign: "right" }}>Placed</span>
-                    <span style={{ textAlign: "right" }}>Sharp</span>
-                    <span style={{ textAlign: "right" }}>Refresh gain</span>
+                    {sortHeader("n_shows", "Shows", METRIC_TIPS.shows)}
+                    {sortHeader("hit_rate_top20", "Hit·20", hitRateTip(20))}
+                    {sortHeader("recall", "Recall", METRIC_TIPS.recall)}
+                    {sortHeader("brier", "Brier", METRIC_TIPS.brier)}
+                    {sortHeader("avg_n_rows", "List", METRIC_TIPS.list)}
+                    {sortHeader("vs_heuristic", "vs heur", METRIC_TIPS.vsHeuristic)}
+                    {sortHeader("setlist_hit_rate", "Setlist", METRIC_TIPS.setlistHitRate)}
+                    {sortHeader("placed_rate", "Placed", METRIC_TIPS.placedRate)}
+                    {sortHeader("sharpshooters", "Sharp", METRIC_TIPS.sharp)}
+                    {sortHeader("refresh_gain", "Refresh gain", METRIC_TIPS.refreshGain)}
                   </div>
-                  {Object.entries(scoreboard.models)
-                    .sort((a, b) => b[1].hit_rate_top10 - a[1].hit_rate_top10)
-                    .map(([key, m]) => (
-                      <div className="standings-grid standings-row" key={key}>
-                        <span className="standings-model">{key}</span>
-                        <span className="standings-dim">{m.kind}</span>
-                        <span style={{ textAlign: "right" }}>{m.n_shows}</span>
-                        <span className="standings-val" style={{ textAlign: "right" }}>
-                          {pct1(m.hit_rate_top10)}
-                        </span>
-                        <span className="standings-val" style={{ textAlign: "right" }}>
-                          {pct1(m.recall)}
-                        </span>
+                  {sortedModels.map(([key, m]) => (
+                    <div className="standings-grid standings-row" key={key}>
+                      <span className="standings-model">{key}</span>
+                      <span className="standings-dim">{m.kind}</span>
+                      <span style={{ textAlign: "right" }}>{m.n_shows}</span>
+                      <span className="standings-val" style={{ textAlign: "right" }}>
+                        {pct1(m.hit_rate_top20)}
+                      </span>
+                      <span className="standings-val" style={{ textAlign: "right" }}>
+                        {pct1(m.recall)}
+                      </span>
+                      <span style={{ textAlign: "right" }}>{m.brier.toFixed(3)}</span>
+                      <span style={{ textAlign: "right" }}>{m.avg_n_rows.toFixed(1)}</span>
+                      {m.vs_heuristic ? (
                         <span
-                          className={m.setlist ? "standings-val" : "standings-dim"}
-                          style={{ textAlign: "right" }}
+                          className={
+                            m.vs_heuristic.hit_rate_top20_delta >= 0
+                              ? "standings-delta pos"
+                              : "standings-delta neg"
+                          }
                         >
-                          {m.setlist ? pct1(m.setlist.hit_rate) : "—"}
+                          {formatSignedPct(m.vs_heuristic.hit_rate_top20_delta)}
                         </span>
-                        <span
-                          className={m.setlist ? "standings-val" : "standings-dim"}
-                          style={{ textAlign: "right" }}
-                        >
-                          {m.setlist ? pct1(m.setlist.placed_rate) : "—"}
-                        </span>
+                      ) : (
                         <span className="standings-dim" style={{ textAlign: "right" }}>
-                          {m.setlist ? m.setlist.sharpshooters : "—"}
+                          —
                         </span>
-                        <span
-                          className={m.refresh_gain ? "standings-val" : "standings-dim"}
-                          style={{ textAlign: "right" }}
-                        >
-                          {m.refresh_gain
-                            ? `${formatSignedPct(m.refresh_gain.mean_hit_rate_top10_delta)} after refresh`
-                            : "—"}
-                        </span>
-                      </div>
-                    ))}
+                      )}
+                      <span
+                        className={m.setlist ? "standings-val" : "standings-dim"}
+                        style={{ textAlign: "right" }}
+                      >
+                        {m.setlist ? pct1(m.setlist.hit_rate) : "—"}
+                      </span>
+                      <span
+                        className={m.setlist ? "standings-val" : "standings-dim"}
+                        style={{ textAlign: "right" }}
+                      >
+                        {m.setlist ? pct1(m.setlist.placed_rate) : "—"}
+                      </span>
+                      <span className="standings-dim" style={{ textAlign: "right" }}>
+                        {m.setlist ? m.setlist.sharpshooters : "—"}
+                      </span>
+                      <span
+                        className={m.refresh_gain ? "standings-val" : "standings-dim"}
+                        style={{ textAlign: "right" }}
+                      >
+                        {m.refresh_gain
+                          ? `${formatSignedPct(m.refresh_gain.mean_hit_rate_top20_delta)} after refresh`
+                          : "—"}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -675,15 +877,18 @@ export default function ShowsScreen({
             ) : !activeScorecard || !activeSource || !shownTake ? (
               <div className="center-msg">Loading scorecard…</div>
             ) : (
-              <div className="shows-row">
-                {/* CARD A: MODEL SCORECARD */}
-                <div className="card shows-card">
-                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+              <>
+                {/* SCORES BAND (full width) — parallels the Upcoming tab: model
+                    header, improvement arc + version chips, then the shortlist
+                    metrics and (when a call was scored) the setlist-call metrics,
+                    grouped with small labels, plus the callouts. */}
+                <div className="card scores-band">
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                     <span className="card-title">{activePastModel}</span>
                     <span className="label-caps">{activeSource.kind}</span>
                   </div>
                   <div className="card-sub" style={{ marginTop: 4 }}>
-                    Frozen shortlist scored against what actually played.
+                    Frozen {shownTake.nRows}-song shortlist scored against what actually played.
                   </div>
 
                   {activeVersions.length > 0 && (
@@ -691,11 +896,22 @@ export default function ShowsScreen({
                       <div className="improvement-line">
                         hit rate{" "}
                         <span className="imp-value">
-                          {pct(activeVersions[0].metrics.hit_rate_top10)}
+                          {pct(activeVersions[0].metrics.hit_rate_top20)}
                         </span>{" "}
                         →{" "}
-                        <span className="imp-value">
-                          {pct(activeSource.metrics.hit_rate_top10)}
+                        <span
+                          className={
+                            "imp-value" +
+                            (activeSource.metrics.hit_rate_top20 >
+                            activeVersions[0].metrics.hit_rate_top20
+                              ? " imp-up"
+                              : activeSource.metrics.hit_rate_top20 <
+                                  activeVersions[0].metrics.hit_rate_top20
+                                ? " imp-down"
+                                : "")
+                          }
+                        >
+                          {pct(activeSource.metrics.hit_rate_top20)}
                         </span>{" "}
                         across {activeVersions.length + 1} takes
                       </div>
@@ -707,7 +923,8 @@ export default function ShowsScreen({
                             className={"version-chip" + (versionSel === i ? " active" : "")}
                             onClick={() => setVersionSel(i)}
                           >
-                            {afterShowdateLabel(v.after_showdate)}
+                            {afterShowdateLabel(v.after_showdate)} ·{" "}
+                            {pct(v.metrics.hit_rate_top20)}
                           </button>
                         ))}
                         <button
@@ -715,45 +932,137 @@ export default function ShowsScreen({
                           className={"version-chip" + (versionSel === "final" ? " active" : "")}
                           onClick={() => setVersionSel("final")}
                         >
-                          final
+                          final · {pct(activeSource.metrics.hit_rate_top20)}
                         </button>
                       </div>
                     </>
                   )}
 
-                  <div className="metrics-strip">
-                    <div className="metric">
-                      <span className="metric-label">Hit rate · top 10</span>
-                      <span className="metric-value">
-                        {pct1(shownTake.metrics.hit_rate_top10)}
-                      </span>
-                      <span className="metric-sub">
-                        {shownTake.metrics.hits_top10}/
-                        {Math.min(10, shownTake.nRows)} hit
-                      </span>
+                  {/* The model's frozen narrative leads the band — the most human
+                      part of the take, read before the numbers. Versions carry no
+                      rationale (§8): the frozen rationale belongs to the FINAL
+                      take only, so hide it when a prior take is selected. */}
+                  {versionSel === "final" && activeSource.rationale && (
+                    <div className="rationale">
+                      <span className="rationale-kicker">Rationale</span>
+                      <p className="rationale-body">{activeSource.rationale}</p>
                     </div>
-                    <div className="metric">
-                      <span className="metric-label">Recall</span>
-                      <span className="metric-value">{pct1(shownTake.metrics.recall)}</span>
-                      <span className="metric-sub">of {activeScorecard.n_played} played</span>
-                    </div>
-                    <div className="metric">
-                      <span className="metric-label">Brier</span>
-                      <span className="metric-value">{shownTake.metrics.brier.toFixed(3)}</span>
-                      <span className="metric-sub">lower = better</span>
-                    </div>
-                    <div className="metric">
-                      <span className="metric-label">Shortlist</span>
-                      <span className="metric-value">{shownTake.nRows}</span>
-                      <span className="metric-sub">songs</span>
+                  )}
+
+                  {/* Shortlist metric group */}
+                  <div className="metric-group">
+                    <div className="metric-group-label">Shortlist</div>
+                    <div className="metrics-strip">
+                      <div className="metric">
+                        <TipLabel
+                          text={`Hit rate · top ${shownTake.metrics.top_n}`}
+                          tip={hitRateTip(shownTake.metrics.top_n)}
+                        />
+                        <span className="metric-value">
+                          {pct1(shownTake.metrics.hit_rate_top20)}
+                        </span>
+                        <span className="metric-sub">
+                          {shownTake.metrics.hits_top20}/
+                          {Math.min(shownTake.metrics.top_n, shownTake.nRows)} hit
+                        </span>
+                      </div>
+                      <div className="metric">
+                        <TipLabel text="Recall" tip={METRIC_TIPS.recall} />
+                        <span className="metric-value">{pct1(shownTake.metrics.recall)}</span>
+                        <span className="metric-sub">of {activeScorecard.n_played} played</span>
+                      </div>
+                      <div className="metric">
+                        <TipLabel text="Brier" tip={METRIC_TIPS.brier} />
+                        <span className="metric-value">{shownTake.metrics.brier.toFixed(3)}</span>
+                        <span className="metric-sub">lower = better</span>
+                      </div>
+                      {vsHeuristicDelta !== null ? (
+                        <div className="metric">
+                          <TipLabel text="vs heuristic" tip={METRIC_TIPS.vsHeuristic} />
+                          <span
+                            className={
+                              "metric-value" + (vsHeuristicDelta >= 0 ? " pos" : " neg")
+                            }
+                          >
+                            {formatSignedPct(vsHeuristicDelta)}
+                          </span>
+                          <span className="metric-sub">vs baseline</span>
+                        </div>
+                      ) : (
+                        <div className="metric">
+                          <span className="metric-label">Log loss</span>
+                          <span className="metric-value">
+                            {shownTake.metrics.log_loss.toFixed(3)}
+                          </span>
+                          <span className="metric-sub">lower = better</span>
+                        </div>
+                      )}
                     </div>
                   </div>
+
+                  {/* Setlist-call metric group — only when a call was scored */}
+                  {shownTake.setlistScore && (
+                    <div className="metric-group">
+                      <div className="metric-group-head">
+                        <div className="metric-group-label">Setlist call</div>
+                        {shownTake.setlistScore.sharpshooter && (
+                          <span className="sharpshooter-badge">★ Sharpshooter</span>
+                        )}
+                      </div>
+                      <div className="metrics-strip">
+                        <div className="metric">
+                          <TipLabel text="Weighted score" tip={METRIC_TIPS.setlistWeighted} />
+                          <span className="metric-value">
+                            {pct1(shownTake.setlistScore.weighted_score)}
+                          </span>
+                          <span className="metric-sub">hit + set + slot</span>
+                        </div>
+                        <div className="metric">
+                          <TipLabel text="Hit rate" tip={METRIC_TIPS.setlistHitRate} />
+                          <span className="metric-value">
+                            {pct1(shownTake.setlistScore.hit_rate)}
+                          </span>
+                          <span className="metric-sub">
+                            {shownTake.setlistScore.hits}/{shownTake.setlistScore.n_songs} songs
+                          </span>
+                        </div>
+                        <div className="metric">
+                          <TipLabel text="Placed rate" tip={METRIC_TIPS.placedRate} />
+                          <span className="metric-value">
+                            {pct1(shownTake.setlistScore.placed_rate)}
+                          </span>
+                          <span className="metric-sub">
+                            {shownTake.setlistScore.placed}/{shownTake.setlistScore.hits} in the
+                            right set
+                          </span>
+                        </div>
+                        <div className="metric">
+                          <TipLabel text="Exact calls" tip={METRIC_TIPS.exactCalls} />
+                          <span className="metric-value">
+                            {shownTake.setlistScore.exact_calls}
+                          </span>
+                          <span className="metric-sub">position matches</span>
+                        </div>
+                      </div>
+                      {marqueeBadges.length > 0 && (
+                        <div className="marquee-badges">
+                          {marqueeBadges.map((label) => (
+                            <span className="marquee-badge" key={label}>
+                              {label}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {(shownTake.bestCall || shownTake.biggestWhiff) && (
                     <div className="callouts">
                       {shownTake.bestCall && (
                         <div className="callout hit">
-                          <span className="callout-kicker">Gutsiest hit</span>
+                          <span className="callout-kicker">
+                            {shownTake.bestCall.prob >= 0.3 ? "Best call" : "Gutsiest hit"}
+                          </span>
                           <span className="callout-body">
                             {shownTake.bestCall.song}
                             <span className="callout-prob">
@@ -777,187 +1086,132 @@ export default function ShowsScreen({
                       )}
                     </div>
                   )}
-
-                  <div className="set-section" style={{ marginTop: 16 }}>
-                    <div className="set-label">Shortlist · frozen P(played) · hit / miss</div>
-                    {shownTake.rows.map((r) => (
-                      <div className={"score-row" + (r.hit ? " hit" : " miss")} key={r.slug}>
-                        <span className="score-mark">{r.hit ? "✓" : "×"}</span>
-                        <span className="score-name">{r.song}</span>
-                        <span className="score-prob">{pct1(r.prob)}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Scorecard versions carry no rationale (§8) — the frozen
-                      rationale belongs to the FINAL take only, so hide it when
-                      a prior take is selected rather than mislabel it. */}
-                  {versionSel === "final" && activeSource.rationale && (
-                    <div className="note">{activeSource.rationale}</div>
-                  )}
                 </div>
 
-                {/* CARD B: WHAT PLAYED (context; full setlist lives on phish.net) */}
-                <div className="card shows-card">
-                  <span className="card-title">What played</span>
-                  <div
-                    className="mono"
-                    style={{ color: "var(--text-muted)", fontSize: 11, margin: "4px 0 16px" }}
-                  >
-                    {dateLabel(activeScorecard.showdate)} · {activeScorecard.venue_name} ·{" "}
-                    {activeScorecard.city}, {activeScorecard.state}
+                {/* TWO-COLUMN ROW: frozen shortlist rows (left) | scored setlist
+                    call (right). */}
+                <div className="shows-row">
+                  {/* LEFT: shortlist rows */}
+                  <div className="card shows-card">
+                    <div className="set-section">
+                      <div className="set-label">Shortlist · frozen P(played) · hit / miss</div>
+                      {shownTake.rows
+                        .slice(
+                          shortlistPage * shortlistPageRows,
+                          (shortlistPage + 1) * shortlistPageRows,
+                        )
+                        .map((r) => (
+                          <div
+                            className={"score-row" + (r.hit ? " hit" : " miss")}
+                            key={r.slug}
+                          >
+                            <span className="score-mark">{r.hit ? "✓" : "×"}</span>
+                            <span className="score-name">{r.song}</span>
+                            <span className="score-prob">{pct1(r.prob)}</span>
+                          </div>
+                        ))}
+                      <Pager
+                        page={shortlistPage}
+                        totalRows={shownTake.rows.length}
+                        pageSize={shortlistPageRows}
+                        onPage={setShortlistPage}
+                      />
+                    </div>
                   </div>
 
-                  {activeScorecard.missed_by_all.length > 0 && (
-                    <div className="set-section">
-                      <div className="set-label">Played · predicted by nobody</div>
-                      <div className="played-list">
-                        {activeScorecard.missed_by_all.map((s) => (
-                          <span className="played-chip miss" key={s.slug}>
-                            {s.song}
-                          </span>
-                        ))}
-                      </div>
+                  {/* RIGHT: what played + the scored setlist call, one panel —
+                      actual setlist chips on top (missed-by-all marked inline),
+                      the model's ordered call scored against it below. */}
+                  <div className="card shows-card">
+                    <span className="card-title">What played</span>
+                    <div
+                      className="mono"
+                      style={{ color: "var(--text-muted)", fontSize: 11, margin: "4px 0 16px" }}
+                    >
+                      {dateLabel(activeScorecard.showdate)} · {activeScorecard.venue_name} ·{" "}
+                      {activeScorecard.city}, {activeScorecard.state}
                     </div>
-                  )}
 
-                  {activeScorecard.played_sets ? (
                     <div className="set-section">
                       <div className="set-label">Actual setlist · {activeScorecard.n_played} songs</div>
-                      {orderSetKeys(Object.keys(activeScorecard.played_sets)).map((key) => (
-                        <div key={key} style={{ marginBottom: 10 }}>
-                          <div className="label-caps" style={{ marginBottom: 4 }}>
-                            {setKeyLabel(key)}
+                      {activeScorecard.played_sets ? (
+                        orderSetKeys(Object.keys(activeScorecard.played_sets)).map((key) => (
+                          <div key={key} style={{ marginBottom: 10 }}>
+                            <div className="label-caps" style={{ marginBottom: 4 }}>
+                              {setKeyLabel(key)}
+                            </div>
+                            <div className="played-list">
+                              {activeScorecard.played_sets![key].map(playedChip)}
+                            </div>
                           </div>
-                          <div className="played-list">
-                            {activeScorecard.played_sets![key].map((s) => (
-                              <span className="played-chip" key={s.slug}>
-                                {s.song}
-                              </span>
+                        ))
+                      ) : (
+                        <div className="played-list">
+                          {activeScorecard.played.map(playedChip)}
+                        </div>
+                      )}
+                      {activeScorecard.missed_by_all.length > 0 && (
+                        <div className="note" style={{ marginTop: 6 }}>
+                          × = in nobody's shortlist
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="set-section">
+                      <div className="set-label">Setlist call · predicted order</div>
+                      {shownTake.setlistScore ? (
+                        orderSetKeys(Object.keys(shownTake.setlistScore.sets)).map((key) => (
+                          <div key={key} style={{ marginBottom: 10 }}>
+                            <div className="label-caps" style={{ marginBottom: 4 }}>
+                              {setKeyLabel(key)} · called
+                            </div>
+                            {shownTake.setlistScore!.sets[key].map((sg, i) => (
+                              <div
+                                className={"setlist-song" + (sg.hit ? "" : " miss")}
+                                key={sg.slug + i}
+                              >
+                                <span
+                                  className={
+                                    "setlist-mark" +
+                                    (sg.exact
+                                      ? " exact"
+                                      : sg.placed
+                                        ? " placed"
+                                        : sg.hit
+                                          ? " hit-only"
+                                          : "")
+                                  }
+                                >
+                                  {sg.hit ? "✓" : "×"}
+                                </span>
+                                <span className="setlist-name">{sg.song}</span>
+                                {sg.exact ? (
+                                  <span className="setlist-exact-tag">★ exact slot</span>
+                                ) : sg.placed ? (
+                                  <span className="setlist-placed-tag">right set</span>
+                                ) : null}
+                              </div>
                             ))}
                           </div>
-                        </div>
-                      ))}
-                      <a
-                        className="btn-link"
-                        href={activeScorecard.phishnet_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ display: "inline-block", marginTop: 4 }}
-                      >
-                        full setlist on phish.net →
-                      </a>
+                        ))
+                      ) : (
+                        <div className="note">no setlist call for this show</div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="set-section">
-                      <div className="set-label">Actual setlist · {activeScorecard.n_played} songs</div>
-                      <div className="played-list">
-                        {activeScorecard.played.map((s) => (
-                          <span className="played-chip" key={s.slug}>
-                            {s.song}
-                          </span>
-                        ))}
-                      </div>
-                      <a
-                        className="btn-link"
-                        href={activeScorecard.phishnet_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ display: "inline-block", marginTop: 14 }}
-                      >
-                        full setlist on phish.net →
-                      </a>
-                    </div>
-                  )}
+
+                    <a
+                      className="btn-link"
+                      href={activeScorecard.phishnet_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ display: "inline-block", marginTop: 4 }}
+                    >
+                      full setlist on phish.net →
+                    </a>
+                  </div>
                 </div>
-              </div>
+              </>
             )}
-
-            {/* CARD C: SETLIST BENCHMARK (§8 setlist_score) — quiet sit-out note
-                when the shown take's frozen source had no structured setlist call. */}
-            {shownTake &&
-              (shownTake.setlistScore ? (
-                <div className="card shows-card" style={{ marginTop: 20, width: "100%" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "baseline",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <span className="card-title">Setlist call</span>
-                    {shownTake.setlistScore.sharpshooter && (
-                      <span className="sharpshooter-badge">★ Sharpshooter</span>
-                    )}
-                  </div>
-                  <div className="card-sub" style={{ marginTop: 4 }}>
-                    Predicted set placement scored against what actually played.
-                  </div>
-
-                  <div className="metrics-strip metrics-strip-3">
-                    <div className="metric">
-                      <span className="metric-label">Hit rate</span>
-                      <span className="metric-value">{pct1(shownTake.setlistScore.hit_rate)}</span>
-                      <span className="metric-sub">
-                        {shownTake.setlistScore.hits}/{shownTake.setlistScore.n_songs} songs
-                      </span>
-                    </div>
-                    <div className="metric">
-                      <span className="metric-label">Placed rate</span>
-                      <span className="metric-value">
-                        {pct1(shownTake.setlistScore.placed_rate)}
-                      </span>
-                      <span className="metric-sub">
-                        {shownTake.setlistScore.placed}/{shownTake.setlistScore.hits} in the right set
-                      </span>
-                    </div>
-                    <div className="metric">
-                      <span className="metric-label">Exact calls</span>
-                      <span className="metric-value">{shownTake.setlistScore.exact_calls}</span>
-                      <span className="metric-sub">position matches</span>
-                    </div>
-                  </div>
-
-                  {marqueeBadges.length > 0 && (
-                    <div className="marquee-badges">
-                      {marqueeBadges.map((label) => (
-                        <span className="marquee-badge" key={label}>
-                          {label}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {orderSetKeys(Object.keys(shownTake.setlistScore.sets)).map((key) => (
-                    <div className="set-section" key={key}>
-                      <div className="set-label">{setKeyLabel(key)} · called</div>
-                      {shownTake.setlistScore!.sets[key].map((sg, i) => (
-                        <div
-                          className={"setlist-song" + (sg.hit ? "" : " miss")}
-                          key={sg.slug + i}
-                        >
-                          <span
-                            className={
-                              "setlist-mark" +
-                              (sg.placed ? " placed" : sg.hit ? " hit-only" : "")
-                            }
-                          >
-                            {sg.hit ? "✓" : "×"}
-                          </span>
-                          <span className="setlist-name">{sg.song}</span>
-                          {sg.placed && <span className="setlist-placed-tag">right set</span>}
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="note" style={{ marginTop: 4 }}>
-                  no setlist call for this show
-                </div>
-              ))}
           </>
         ))}
     </>

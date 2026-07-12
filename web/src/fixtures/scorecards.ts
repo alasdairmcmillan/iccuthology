@@ -36,39 +36,56 @@ export const genScoreboard: Scoreboard = {
     heuristic: {
       kind: "statistical",
       n_shows: 2,
-      hit_rate_top10: 0.9,
+      hit_rate_top20: 0.9,
       recall: 0.5441,
       brier: 0.149,
       log_loss: 0.451,
+      avg_n_rows: 23.0,
+      // The baseline itself carries no vs_heuristic entry.
     },
     "mcp:claude-fable": {
       kind: "mcp",
       n_shows: 1,
-      hit_rate_top10: 0.625,
+      hit_rate_top20: 0.625,
       recall: 0.2941,
       brier: 0.221,
       log_loss: 0.612,
+      avg_n_rows: 8.0,
       setlist: {
         n_shows: 1,
         hit_rate: 0.875,
         placed_rate: 0.8571,
+        weighted_score: 0.75, // mean of the one show's weighted_score
         marquee_calls: 4,
         exact_calls: 5,
         sharpshooters: 1,
       },
       refresh_gain: {
         n_shows: 1,
-        mean_hit_rate_top10_delta: 0.2917,
+        mean_hit_rate_top20_delta: 0.2917,
         mean_recall_delta: 0.1765,
+      },
+      // Beat the baseline on its one scored show — exercises the green delta.
+      vs_heuristic: {
+        n_shows: 1,
+        hit_rate_top20_delta: 0.075,
+        recall_delta: 0.0588,
       },
     },
     "mcp:gemini-3.5-flash": {
       kind: "mcp",
       n_shows: 1,
-      hit_rate_top10: 0.0,
+      hit_rate_top20: 0.0,
       recall: 0.0,
       brier: 0.352,
       log_loss: 0.98,
+      avg_n_rows: 5.0,
+      // A cold night — well below baseline, exercises the red delta.
+      vs_heuristic: {
+        n_shows: 1,
+        hit_rate_top20_delta: -0.9,
+        recall_delta: -0.5,
+      },
     },
   },
 };
@@ -133,8 +150,9 @@ export const genScorecards: Record<string, Scorecard> = {
         kind: "statistical",
         n_rows: 40,
         metrics: {
-          hits_top10: 8,
-          hit_rate_top10: 0.8,
+          top_n: 20,
+          hits_top20: 16,
+          hit_rate_top20: 0.8,
           recall: 0.5882,
           brier: 0.187,
           log_loss: 0.542,
@@ -169,8 +187,9 @@ export const genScorecards: Record<string, Scorecard> = {
           "Leaning into a Tweezer/Hood anchor with Fluffhead overdue (12-show gap). " +
           "Carini as the dark-horse jam vehicle for the mid-second-set slot.",
         metrics: {
-          hits_top10: 5,
-          hit_rate_top10: 0.625,
+          top_n: 20,
+          hits_top20: 5,
+          hit_rate_top20: 0.625,
           recall: 0.2941,
           brier: 0.221,
           log_loss: 0.612,
@@ -196,22 +215,32 @@ export const genScorecards: Record<string, Scorecard> = {
           n_songs: 8,
           sets: {
             "1": [
-              { slug: "wilson", song: "Wilson", hit: true, placed: true },
-              { slug: "chalk-dust-torture", song: "Chalk Dust Torture", hit: true, placed: true },
-              { slug: "carini", song: "Carini", hit: true, placed: false },
-              { slug: "fluffhead", song: "Fluffhead", hit: false, placed: false },
+              // Exact: opens set 1, matching the actual set-1 opener.
+              { slug: "wilson", song: "Wilson", hit: true, placed: true, exact: true },
+              // Exact: called + played 2nd in set 1.
+              { slug: "chalk-dust-torture", song: "Chalk Dust Torture", hit: true, placed: true, exact: true },
+              // Right song, WRONG set (played in set 2) -> hit only.
+              { slug: "carini", song: "Carini", hit: true, placed: false, exact: false },
+              // Outright miss.
+              { slug: "fluffhead", song: "Fluffhead", hit: false, placed: false, exact: false },
             ],
             "2": [
-              { slug: "tweezer", song: "Tweezer", hit: true, placed: true },
-              { slug: "harry-hood", song: "Harry Hood", hit: true, placed: true },
-              { slug: "simple", song: "Simple", hit: true, placed: true },
+              // Exact: opens set 2, matching the actual set-2 opener.
+              { slug: "tweezer", song: "Tweezer", hit: true, placed: true, exact: true },
+              // Exact: called + played 2nd in set 2.
+              { slug: "harry-hood", song: "Harry Hood", hit: true, placed: true, exact: true },
+              // Right set, wrong slot (played later in set 2) -> placed, not exact.
+              { slug: "simple", song: "Simple", hit: true, placed: true, exact: false },
             ],
-            e: [{ slug: "down-with-disease", song: "Down with Disease", hit: true, placed: true }],
+            // Exact: the encore call landed in its exact slot.
+            e: [{ slug: "down-with-disease", song: "Down with Disease", hit: true, placed: true, exact: true }],
           },
           hits: 7,
           hit_rate: 0.875,
           placed: 6,
           placed_rate: 0.8571,
+          // (hits + placed + exact_calls) / (3 * n_songs) = (7 + 6 + 5) / 24.
+          weighted_score: 0.75,
           marquee: {
             opener: true,
             set1_closer: false,
@@ -230,8 +259,9 @@ export const genScorecards: Record<string, Scorecard> = {
             submitted_at: "2026-07-01T10:00:00Z",
             after_showdate: null, // pre-run: no prior show in this run yet
             metrics: {
-              hits_top10: 2,
-              hit_rate_top10: 0.3333,
+              top_n: 20,
+              hits_top20: 2,
+              hit_rate_top20: 0.3333,
               recall: 0.1176,
               brier: 0.28,
               log_loss: 0.75,
@@ -250,8 +280,9 @@ export const genScorecards: Record<string, Scorecard> = {
             submitted_at: "2026-07-07T09:00:00Z",
             after_showdate: "2026-07-06", // knew the Bethel Woods result
             metrics: {
-              hits_top10: 4,
-              hit_rate_top10: 0.5,
+              top_n: 20,
+              hits_top20: 4,
+              hit_rate_top20: 0.5,
               recall: 0.2353,
               brier: 0.24,
               log_loss: 0.68,
@@ -327,8 +358,9 @@ export const genScorecards: Record<string, Scorecard> = {
         kind: "statistical",
         n_rows: 6,
         metrics: {
-          hits_top10: 6,
-          hit_rate_top10: 1.0,
+          top_n: 20,
+          hits_top20: 6,
+          hit_rate_top20: 1.0,
           recall: 0.5,
           brier: 0.111,
           log_loss: 0.36,
@@ -356,8 +388,9 @@ export const genScorecards: Record<string, Scorecard> = {
           "Betting on a rock-forward opener set — Blaze On into Wilson — with Possum " +
           "closing. A cold night for the model: none of these landed.",
         metrics: {
-          hits_top10: 0,
-          hit_rate_top10: 0.0,
+          top_n: 20,
+          hits_top20: 0,
+          hit_rate_top20: 0.0,
           recall: 0.0,
           brier: 0.352,
           log_loss: 0.98,
