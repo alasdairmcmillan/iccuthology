@@ -95,6 +95,21 @@ def conn():
     c.close()
 
 
+def _n_valid_predictions(conn, n=20):
+    """``n`` valid ``{slug, prob}`` rows, registering filler songs in ``conn`` as
+    needed, so a submission clears the 20-40 shortlist-length bound (§5)."""
+    rows = []
+    for i in range(n):
+        slug = f"pred-song-{i}"
+        conn.execute(
+            "INSERT OR IGNORE INTO songs (songid, slug, name, is_original) VALUES (?,?,?,1)",
+            (5000 + i, slug, f"Pred Song {i}"),
+        )
+        rows.append({"slug": slug, "prob": round(0.9 - i * 0.01, 4)})
+    conn.commit()
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # Read tools
 # ---------------------------------------------------------------------------
@@ -205,10 +220,13 @@ def test_heuristic_prediction_returns_ranked_rows(conn):
 # ---------------------------------------------------------------------------
 
 def test_submit_prediction_writes_expected_schema(conn, tmp_path):
+    predictions = _n_valid_predictions(conn, 20)
+    predictions[0] = {"slug": "tweezer", "prob": 0.6}
+    predictions[1] = {"slug": "wilson", "prob": 0.3}
     result = tools.submit_prediction(
         "2026-07-09",
         "claude-desktop",
-        [{"slug": "tweezer", "prob": 0.6}, {"slug": "wilson", "prob": 0.3}],
+        predictions,
         rationale="due for a wilson",
         conn=conn,
         out_dir=tmp_path,
@@ -227,6 +245,7 @@ def test_submit_prediction_writes_expected_schema(conn, tmp_path):
     assert isinstance(payload["epoch"], str) and len(payload["epoch"]) == 12  # stamped from phishpred.epoch
     assert payload["rationale"] == "due for a wilson"
     assert payload["submitted_at"].endswith("Z")
+    assert len(payload["predictions"]) == 20  # within the 20-40 shortlist bound
 
     for row in payload["predictions"]:
         assert set(row.keys()) == {"slug", "prob"}
@@ -234,11 +253,37 @@ def test_submit_prediction_writes_expected_schema(conn, tmp_path):
     # Probs are stored AS SUBMITTED (clamped), NOT renormalized — publish does
     # the single authoritative renormalize-to-K at fold time.
     by_slug = {row["slug"]: row["prob"] for row in payload["predictions"]}
-    assert by_slug == {"tweezer": 0.6, "wilson": 0.3}
+    assert by_slug["tweezer"] == 0.6 and by_slug["wilson"] == 0.3
 
     # rows sorted by prob desc
     probs_list = [row["prob"] for row in payload["predictions"]]
     assert probs_list == sorted(probs_list, reverse=True)
+
+
+def test_submit_prediction_rejects_too_few_predictions(conn, tmp_path):
+    with pytest.raises(ValueError, match="between 20 and 40"):
+        tools.submit_prediction(
+            "2026-07-09", "agent-x", _n_valid_predictions(conn, 19),
+            conn=conn, out_dir=tmp_path,
+        )
+    assert not any((tmp_path / "agent-x").glob("*.json"))
+
+
+def test_submit_prediction_rejects_too_many_predictions(conn, tmp_path):
+    with pytest.raises(ValueError, match="between 20 and 40"):
+        tools.submit_prediction(
+            "2026-07-09", "agent-x", _n_valid_predictions(conn, 41),
+            conn=conn, out_dir=tmp_path,
+        )
+
+
+def test_submit_prediction_accepts_max_shortlist(conn, tmp_path):
+    result = tools.submit_prediction(
+        "2026-07-09", "agent-x", _n_valid_predictions(conn, 40),
+        conn=conn, out_dir=tmp_path,
+    )
+    payload = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
+    assert len(payload["predictions"]) == 40
 
 
 def test_submit_prediction_rejects_unknown_slug(conn, tmp_path):
@@ -286,7 +331,7 @@ def test_submit_prediction_sanitizes_model_label_for_path(conn, tmp_path):
     result = tools.submit_prediction(
         "2026-07-09",
         "Claude Desktop / v2!",
-        [{"slug": "tweezer", "prob": 0.5}],
+        _n_valid_predictions(conn, 20),
         conn=conn,
         out_dir=tmp_path,
     )
@@ -311,7 +356,7 @@ def test_submit_prediction_writes_setlist(conn, tmp_path):
     result = tools.submit_prediction(
         "2026-07-09",
         "agent-x",
-        [{"slug": "tweezer", "prob": 0.6}],
+        _n_valid_predictions(conn, 20),
         setlist={"sets": {"1": ["tweezer", "yem"], "e": ["wilson"]}},
         conn=conn,
         out_dir=tmp_path,
@@ -319,12 +364,12 @@ def test_submit_prediction_writes_setlist(conn, tmp_path):
     payload = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
     assert payload["setlist"] == {"sets": {"1": ["tweezer", "yem"], "e": ["wilson"]}}
     # setlist is independent of predictions; both are present here
-    assert [r["slug"] for r in payload["predictions"]] == ["tweezer"]
+    assert len(payload["predictions"]) == 20
 
 
 def test_submit_prediction_setlist_omitted_when_absent(conn, tmp_path):
     result = tools.submit_prediction(
-        "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+        "2026-07-09", "agent-x", _n_valid_predictions(conn, 20),
         conn=conn, out_dir=tmp_path,
     )
     payload = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
@@ -391,7 +436,7 @@ def test_submit_prediction_setlist_rejects_empty_set(conn, tmp_path):
 
 def test_first_submission_omits_versions_key(conn, tmp_path):
     result = tools.submit_prediction(
-        "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+        "2026-07-09", "agent-x", _n_valid_predictions(conn, 20),
         conn=conn, out_dir=tmp_path,
     )
     payload = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
@@ -400,31 +445,31 @@ def test_first_submission_omits_versions_key(conn, tmp_path):
 
 def test_resubmission_appends_prior_to_versions(conn, tmp_path):
     tools.submit_prediction(
-        "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+        "2026-07-09", "agent-x", _n_valid_predictions(conn, 20),
         rationale="take 1", conn=conn, out_dir=tmp_path,
         submitted_at="2026-07-08T10:00:00Z",
     )
     result = tools.submit_prediction(
-        "2026-07-09", "agent-x", [{"slug": "wilson", "prob": 0.7}],
+        "2026-07-09", "agent-x", _n_valid_predictions(conn, 22),
         rationale="take 2", conn=conn, out_dir=tmp_path,
         submitted_at="2026-07-09T10:00:00Z",
     )
     payload = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
     # latest take is the top level
-    assert [r["slug"] for r in payload["predictions"]] == ["wilson"]
+    assert len(payload["predictions"]) == 22
     assert payload["rationale"] == "take 2"
     # one prior take carried into versions (oldest first), stripped of its own key
     assert len(payload["versions"]) == 1
     prior = payload["versions"][0]
     assert prior["rationale"] == "take 1"
-    assert [r["slug"] for r in prior["predictions"]] == ["tweezer"]
+    assert len(prior["predictions"]) == 20
     assert "versions" not in prior
 
 
 def test_resubmission_keeps_only_10_most_recent_priors(conn, tmp_path):
     for i in range(12):  # 12 submissions -> the 12th keeps 10 priors (drops 2 oldest)
         tools.submit_prediction(
-            "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.5}],
+            "2026-07-09", "agent-x", _n_valid_predictions(conn, 20),
             rationale=f"take {i}", conn=conn, out_dir=tmp_path,
             submitted_at=f"2026-07-09T{i:02d}:00:00Z",
         )
@@ -441,7 +486,7 @@ def test_resubmission_unreadable_prior_treated_as_no_history(conn, tmp_path, cap
     dest.mkdir(parents=True)
     (dest / "2026-07-09.json").write_text("{not valid json", encoding="utf-8")
     result = tools.submit_prediction(
-        "2026-07-09", "agent-x", [{"slug": "tweezer", "prob": 0.6}],
+        "2026-07-09", "agent-x", _n_valid_predictions(conn, 20),
         conn=conn, out_dir=tmp_path,
     )
     payload = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
@@ -453,7 +498,7 @@ def test_submit_prediction_honors_explicit_epoch_and_timestamp(conn, tmp_path):
     result = tools.submit_prediction(
         "2026-07-09",
         "agent-x",
-        [{"slug": "tweezer", "prob": 0.5}],
+        _n_valid_predictions(conn, 20),
         conn=conn,
         out_dir=tmp_path,
         epoch="deadbeef1234",
@@ -461,3 +506,152 @@ def test_submit_prediction_honors_explicit_epoch_and_timestamp(conn, tmp_path):
     )
     assert result["payload"]["epoch"] == "deadbeef1234"
     assert result["payload"]["submitted_at"] == "2026-07-09T12:00:00Z"
+
+
+# ---------------------------------------------------------------------------
+# show_length_stats (read tool) — songs-per-show calibration context
+# ---------------------------------------------------------------------------
+
+def test_show_length_stats_by_year_and_overall(conn):
+    stats = tools.show_length_stats(conn)  # anchored on 2026 -> since 2017-01-01
+    assert stats["since"] == "2017-01-01"
+    assert stats["overall"]["shows"] == 6
+    assert stats["overall"]["avg_songs"] == pytest.approx(14 / 6, abs=0.01)
+    years = {y["year"]: y for y in stats["by_year"]}
+    assert list(years) == ["2022", "2026"]  # ascending
+    assert years["2022"]["shows"] == 5
+    assert years["2022"]["avg_songs"] == pytest.approx(2.4)
+    assert years["2022"]["min_songs"] == 2
+    assert years["2022"]["max_songs"] == 3
+    assert years["2026"] == {
+        "year": "2026", "shows": 1, "avg_songs": 2.0,
+        "avg_distinct_songs": 2.0, "min_songs": 2, "max_songs": 2,
+    }
+
+
+def test_show_length_stats_window_narrows(conn):
+    stats = tools.show_length_stats(conn, years=1)  # 2026 only
+    assert stats["since"] == "2026-01-01"
+    assert stats["overall"]["shows"] == 1
+    assert [y["year"] for y in stats["by_year"]] == ["2026"]
+
+
+def test_show_length_stats_counts_repeats_vs_distinct(conn):
+    # A reprise: tweezer (101) played twice in show 10 -> avg_songs counts both,
+    # avg_distinct_songs counts it once.
+    conn.execute(
+        "INSERT INTO performances (showid, songid, set_label, position) VALUES (10, 101, 'e', 2)"
+    )
+    conn.commit()
+    stats = tools.show_length_stats(conn, years=1)
+    y = stats["by_year"][0]
+    assert y["avg_songs"] == 3.0
+    assert y["avg_distinct_songs"] == 2.0
+
+
+def test_show_length_stats_empty_db():
+    c = db.get_connection(":memory:")
+    db.init_db(c)
+    stats = tools.show_length_stats(c)
+    assert stats == {"since": None, "overall": {"shows": 0}, "by_year": []}
+    c.close()
+
+
+# ---------------------------------------------------------------------------
+# scoreboard (read tool) — over a tmp scorecards dir with small fixtures
+# ---------------------------------------------------------------------------
+
+def _write_scorecards(dir_path: Path) -> None:
+    dir_path.mkdir(parents=True, exist_ok=True)
+    board = {
+        "updated_at": "2026-07-11T06:00:00Z",
+        "shows": [
+            {"showdate": "2026-07-08", "venue_name": "Ruoff", "city": "N", "state": "IN",
+             "n_played": 21, "source_keys": ["heuristic", "mcp:claude-opus"]},
+            {"showdate": "2026-07-05", "venue_name": "Ruoff", "city": "N", "state": "IN",
+             "n_played": 20, "source_keys": ["heuristic", "mcp:claude-opus"]},
+        ],
+        "models": {
+            "heuristic": {"kind": "statistical", "n_shows": 2, "hit_rate_top20": 0.5,
+                          "recall": 0.4, "brier": 0.1, "log_loss": 0.3, "avg_n_rows": 40.0},
+            "mcp:claude-opus": {"kind": "mcp", "n_shows": 2, "hit_rate_top20": 0.6,
+                                "recall": 0.5, "brier": 0.08, "log_loss": 0.25, "avg_n_rows": 25.0,
+                                "vs_heuristic": {"n_shows": 2, "hit_rate_top20_delta": 0.1,
+                                                 "recall_delta": 0.1}},
+        },
+    }
+    (dir_path / "scoreboard.json").write_text(json.dumps(board), encoding="utf-8")
+    for showdate, nplayed in (("2026-07-05", 20), ("2026-07-08", 21)):
+        card = {
+            "showdate": showdate, "venue_name": "Ruoff", "city": "N", "state": "IN",
+            "n_played": nplayed,
+            "sources": {
+                "heuristic": {
+                    "model": "heuristic", "kind": "statistical", "n_rows": 40,
+                    "metrics": {"top_n": 20, "hits_top20": 6, "hit_rate_top20": 0.5,
+                                "recall": 0.4, "brier": 0.1, "log_loss": 0.3},
+                    "best_call": {"song": "Harry Hood", "slug": "hood", "prob": 0.12},
+                    "biggest_whiff": None,
+                    "rows": [{"song": "Harry Hood", "slug": "hood", "prob": 0.6, "hit": True}],
+                },
+                "mcp:claude-opus": {
+                    "model": "mcp:claude-opus", "kind": "mcp", "n_rows": 25,
+                    "metrics": {"top_n": 20, "hits_top20": 7, "hit_rate_top20": 0.6,
+                                "recall": 0.5, "brier": 0.08, "log_loss": 0.25},
+                    "best_call": None,
+                    "biggest_whiff": {"song": "Ghost", "slug": "ghost", "prob": 0.5},
+                    "rows": [{"song": "Ghost", "slug": "ghost", "prob": 0.5, "hit": False}],
+                },
+            },
+            "missed_by_all": [{"slug": "yem", "song": "YEM"}],
+        }
+        (dir_path / f"{showdate}.json").write_text(json.dumps(card), encoding="utf-8")
+
+
+def test_scoreboard_returns_models_and_compact_recent_shows(tmp_path):
+    _write_scorecards(tmp_path)
+    result = tools.scoreboard(tmp_path, model_label="claude-opus", recent=5)
+
+    # models mapping passes through verbatim (incl. avg_n_rows / vs_heuristic)
+    assert "heuristic" in result["models"]
+    assert result["models"]["mcp:claude-opus"]["vs_heuristic"]["hit_rate_top20_delta"] == 0.1
+    assert result["models"]["heuristic"]["avg_n_rows"] == 40.0
+
+    # recent shows showdate DESC
+    dates = [s["showdate"] for s in result["recent_shows"]]
+    assert dates == ["2026-07-08", "2026-07-05"]
+
+    show = result["recent_shows"][0]
+    assert show["n_played"] == 21
+    assert set(show["sources"]) == {"heuristic", "mcp:claude-opus"}
+    assert show["sources"]["mcp:claude-opus"]["metrics"]["hit_rate_top20"] == 0.6
+    assert show["sources"]["mcp:claude-opus"]["biggest_whiff"]["slug"] == "ghost"
+    assert show["missed_by_all"] == [{"slug": "yem", "song": "YEM"}]
+    # compact: full per-source row lists are omitted
+    assert "rows" not in show["sources"]["heuristic"]
+
+
+def test_scoreboard_without_model_label_shows_only_heuristic(tmp_path):
+    _write_scorecards(tmp_path)
+    result = tools.scoreboard(tmp_path)
+    show = result["recent_shows"][0]
+    assert set(show["sources"]) == {"heuristic"}  # own track omitted without a label
+
+
+def test_scoreboard_respects_recent_limit(tmp_path):
+    _write_scorecards(tmp_path)
+    result = tools.scoreboard(tmp_path, recent=1)
+    assert [s["showdate"] for s in result["recent_shows"]] == ["2026-07-08"]
+
+
+def test_scoreboard_missing_dir_returns_empty(tmp_path):
+    result = tools.scoreboard(tmp_path / "does-not-exist", model_label="claude-opus")
+    assert result == {"models": {}, "recent_shows": []}
+
+
+def test_scoreboard_empty_dir_returns_empty(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    result = tools.scoreboard(empty)
+    assert result["models"] == {}
+    assert result["recent_shows"] == []

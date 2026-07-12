@@ -18,6 +18,12 @@ ambiguous. Data contracts: `DEPLOY-CONTRACTS.md` §5 (submission schema),
 - Helper scripts and dumps you write along the way (context extracts, a
   submitter carrying your picks, etc.) go in `tmp/` (gitignored), NEVER the
   repo root. Delete them when you're done unless the human asks to keep them.
+- Tooling you want to KEEP across sessions (your own analysis scripts,
+  research helpers, prompt notes) goes in `agents/<your-workspace>/` — a
+  committed, sandboxed workspace per harness/track (e.g.
+  `agents/antigravity/`). Read its README for the rules; the short version:
+  write freely inside your folder, never modify anything outside it, and
+  nothing in `phishpred` core may import from it.
 
 ## The task: submit scoreboard predictions for every future show
 
@@ -56,6 +62,8 @@ from phishpred.db import get_connection
 from phishpred.mcp import tools
 conn = get_connection("data/phish.db")
 
+tools.scoreboard("data/scorecards", model_label=label)  # YOUR track record vs the heuristic baseline — start here
+tools.show_length_stats(conn)            # songs/show averages: shortlist is scored against ~18-19 distinct songs
 tools.run_context(conn, showdate)        # the multi-night run; played nights included
 tools.recent_setlists(conn, n=10)        # tour context
 tools.candidate_features(conn, showdate) # feature frame: decayed_rate, gap, played_in_run, played_prev_show, ...
@@ -63,6 +71,16 @@ tools.heuristic_prediction(conn, showdate)  # the statistical baseline — beat 
 tools.song_history(conn, slug)           # deep-dive one song
 tools.venue_history(conn, venue)         # what this venue tends to get
 ```
+
+Calibration notes from the scored record (why the first two tools matter):
+
+- Your `predictions` list must be 20–40 songs; its scored hit rate uses your
+  top 20. Shows average ~18–19 distinct songs in the current era, so a
+  20-song list is a full "call the show" attempt and probs should sum near
+  that.
+- `scoreboard(...)` shows your `vs_heuristic` paired deltas — if you're
+  losing to the baseline, study its recent takes before submitting more of
+  the same.
 
 Hard rules (Phish rotation, non-negotiable):
 
@@ -89,7 +107,7 @@ is disguised plagiarism of the pipeline and will be removed.
 tools.submit_prediction(
     showdate,                      # "YYYY-MM-DD"
     model_label,                   # from step 1 — EXACT string, every show
-    predictions,                   # 25-40 of {"slug": str, "prob": float in (0,1]}
+    predictions,                   # 20-40 of {"slug": str, "prob": float in (0,1]}
     rationale,                     # per-show narrative — see below
     setlist={"sets": {"1": [...], "2": [...], "e": [...]}},
     conn=conn,

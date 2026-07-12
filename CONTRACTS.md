@@ -374,32 +374,37 @@ the authoritative scorecard/scoreboard JSON shapes. Pure core + DB-backed driver
 def score_show(frozen_payload: dict, played: list[dict]) -> dict
     """Score one frozen `show/{showdate}.json` doc against the played setlist.
     `played` = distinct performed songs in setlist order [{"slug","song"}, ...].
-    Per source: hits_top10 over the first min(10, n_rows) rows (frozen prob-desc
-    order preserved), hit_rate_top10, recall = |played ∩ shortlist| / n_played,
+    Per source: hits_top20 over the first min(20, n_rows) rows (frozen prob-desc
+    order preserved), hit_rate_top20, top_n (the cutoff, published so consumers
+    don't hardcode it), recall = |played ∩ shortlist| / n_played,
     brier = mean (prob - hit)^2, log_loss (probs clamped to [0.001, 0.999]),
     best_call (hit, lowest prob; null if none) / biggest_whiff (miss, highest
     prob; null if none). mcp sources keep frozen rationale/submitted_at verbatim.
     Emits `missed_by_all` (played songs in NO source's shortlist)."""
 
 def build_scoreboard(scorecards: list[dict]) -> dict
-    """Rolling index + per-model unweighted metric means. `shows` showdate DESC;
+    """Rolling index + per-model unweighted metric means (incl. `avg_n_rows`, the
+    mean shortlist length, and `vs_heuristic`, paired mean deltas of a model
+    against the `heuristic` source over shows both scored — omitted for the
+    heuristic itself and when zero shows are paired). `shows` showdate DESC;
     empty shows/models is valid."""
 
-def score_all(conn, frozen_dir, out_dir, rescore_days=7, today=None) -> list[str]
+def score_all(conn, frozen_dir, out_dir, rescore_days=7, today=None, force=False) -> list[str]
     """Scan `{frozen_dir}/{showdate}.json`; for each show indexed in the DB
     (show_index IS NOT NULL) and showdate < UTC today, write
     `{out_dir}/{showdate}.json`. Skip when a scorecard exists UNLESS showdate >=
-    today - rescore_days (idempotent rewrite inside the window). ALWAYS rebuild
-    `{out_dir}/scoreboard.json` from every scorecard present (creates out_dir).
-    `today` injectable for tests. Malformed frozen files skipped (stderr warning,
-    never crash). Returns the showdates (re)written."""
+    today - rescore_days (idempotent rewrite inside the window); `force=True`
+    rescores EVERY eligible show regardless (for metric-definition changes).
+    ALWAYS rebuild `{out_dir}/scoreboard.json` from every scorecard present
+    (creates out_dir). `today` injectable for tests. Malformed frozen files
+    skipped (stderr warning, never crash). Returns the showdates (re)written."""
 ```
 - Played set from DB: distinct performed slugs in setlist order of first
   occurrence (performances ⋈ songs, `ORDER BY set_label, position` — same idiom
   as `mcp.tools.recent_setlists`).
 - Freeze rule (§8): a scorecard is only ever computed from a frozen file, never a
   current-epoch artifact; `frozen_epoch` records provenance.
-- CLI: `phishpred score --frozen DIR --out DIR [--rescore-days 7]`.
+- CLI: `phishpred score --frozen DIR --out DIR [--rescore-days 7] [--force]`.
 
 ## Testing conventions
 

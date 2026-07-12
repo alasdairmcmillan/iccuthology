@@ -56,7 +56,15 @@ const SCOREBOARD = {
     },
   ],
   models: {
-    heuristic: { kind: "statistical", n_shows: 3, hit_rate_top10: 0.55, recall: 0.41, brier: 0.09, log_loss: 0.29 },
+    heuristic: {
+      kind: "statistical",
+      n_shows: 3,
+      hit_rate_top20: 0.55,
+      recall: 0.41,
+      brier: 0.09,
+      log_loss: 0.29,
+      avg_n_rows: 37.5,
+    },
   },
 };
 
@@ -75,7 +83,7 @@ const SCORECARD = {
       model: "heuristic",
       kind: "statistical",
       n_rows: 40,
-      metrics: { hits_top10: 6, hit_rate_top10: 0.6, recall: 0.4286, brier: 0.081, log_loss: 0.31 },
+      metrics: { top_n: 20, hits_top20: 6, hit_rate_top20: 0.6, recall: 0.4286, brier: 0.081, log_loss: 0.31 },
       best_call: { song: "Harry Hood", slug: "harry-hood", prob: 0.12 },
       biggest_whiff: null,
       rows: [{ song: "Harry Hood", slug: "harry-hood", prob: 0.61, hit: true }],

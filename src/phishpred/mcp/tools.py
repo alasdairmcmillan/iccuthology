@@ -32,6 +32,11 @@ _SAFE_LABEL_RE = re.compile(r"[^A-Za-z0-9_-]+")
 _SET_KEY_RE = re.compile(r"^(\d+|e\d*)$")
 # A structured setlist may name at most this many songs (§5).
 _MAX_SETLIST_SONGS = 40
+# An MCP prediction shortlist must name between this many songs (inclusive) — a
+# too-short list under-commits, a too-long one is a dragnet (§5). Bounds apply
+# ONLY to MCP submissions, not to heuristic_prediction / the publish pipeline.
+_MIN_SHORTLIST = 20
+_MAX_SHORTLIST = 40
 # Keep at most this many prior takes when a submission is rewritten (§5).
 _MAX_VERSIONS = 10
 
@@ -297,6 +302,75 @@ def recent_setlists(conn: sqlite3.Connection, n: int = 10) -> dict[str, Any]:
     return {"shows": out}
 
 
+def show_length_stats(conn: sqlite3.Connection, years: int = 10) -> dict[str, Any]:
+    """Songs-per-show distribution over the last ``years`` calendar years —
+    calibration context for sizing a shortlist and its total probability mass
+    (§5 ground rules: probs should sum near the expected setlist size).
+
+    Anchored on the latest PLAYED showdate in the DB (not the wall clock), so
+    the window is reproducible and leakage-safe: the returned span covers the
+    ``years`` calendar years up to and including the latest played show's year.
+    ``by_year`` is ascending; ``avg_songs`` counts performances (repeats
+    included, e.g. a reprise), ``avg_distinct_songs`` counts distinct songs —
+    the number a shortlist is actually scored against.
+    """
+    latest = conn.execute(
+        "SELECT MAX(showdate) AS d FROM shows "
+        "WHERE exclude = 0 AND show_index IS NOT NULL"
+    ).fetchone()
+    if latest is None or latest["d"] is None:
+        return {"since": None, "overall": {"shows": 0}, "by_year": []}
+    since = f"{int(str(latest['d'])[:4]) - years + 1:04d}-01-01"
+
+    per_show = conn.execute(
+        "SELECT substr(s.showdate, 1, 4) AS yr, "
+        "COUNT(p.songid) AS n_songs, COUNT(DISTINCT p.songid) AS n_distinct "
+        "FROM shows s JOIN performances p ON p.showid = s.showid "
+        "WHERE s.exclude = 0 AND s.show_index IS NOT NULL AND s.showdate >= ? "
+        "GROUP BY s.showid",
+        (since,),
+    ).fetchall()
+
+    by_year: dict[str, dict[str, Any]] = {}
+    all_songs: list[int] = []
+    all_distinct: list[int] = []
+    for row in per_show:
+        y = by_year.setdefault(
+            row["yr"], {"year": row["yr"], "shows": 0, "_songs": [], "_distinct": []}
+        )
+        y["shows"] += 1
+        y["_songs"].append(row["n_songs"])
+        y["_distinct"].append(row["n_distinct"])
+        all_songs.append(row["n_songs"])
+        all_distinct.append(row["n_distinct"])
+
+    def _mean(vals: list[int]) -> float:
+        return round(sum(vals) / len(vals), 2) if vals else 0.0
+
+    years_out = []
+    for y in sorted(by_year.values(), key=lambda v: v["year"]):
+        years_out.append(
+            {
+                "year": y["year"],
+                "shows": y["shows"],
+                "avg_songs": _mean(y["_songs"]),
+                "avg_distinct_songs": _mean(y["_distinct"]),
+                "min_songs": min(y["_songs"]),
+                "max_songs": max(y["_songs"]),
+            }
+        )
+
+    return {
+        "since": since,
+        "overall": {
+            "shows": len(per_show),
+            "avg_songs": _mean(all_songs),
+            "avg_distinct_songs": _mean(all_distinct),
+        },
+        "by_year": years_out,
+    }
+
+
 def run_context(conn: sqlite3.Connection, showdate: str) -> dict[str, Any]:
     """The multi-night run ``showdate`` belongs to (maximal chain of shows at
     the same canonical venue), including already-played nights' setlists.
@@ -374,6 +448,85 @@ def heuristic_prediction(
     return payload
 
 
+def scoreboard(
+    scorecards_dir: str | Path,
+    model_label: str | None = None,
+    recent: int = 5,
+) -> dict[str, Any]:
+    """Your own track record + the heuristic baseline, for pre-submission
+    calibration (§8). Reads the published scorecards tier -- leakage-safe, since
+    scorecards only ever exist for already-played shows.
+
+    ``scorecards_dir`` holds ``scoreboard.json`` plus one ``{showdate}.json`` per
+    scored show (the output of ``phishpred score``). Returns:
+
+    - ``models``: the ``scoreboard.json`` ``models`` mapping -- per-model
+      aggregate metrics incl. ``avg_n_rows`` and, for non-heuristic models,
+      ``vs_heuristic`` (paired deltas against the baseline).
+    - ``recent_shows``: for the most recent ``recent`` scored shows (showdate
+      DESC), a COMPACT per-show summary -- ``showdate``, ``venue_name``,
+      ``n_played``, ``missed_by_all``, and per source (the ``heuristic`` plus,
+      when ``model_label`` is given, ``mcp:{model_label}``) that source's
+      ``metrics``/``best_call``/``biggest_whiff``. Full row lists are omitted to
+      keep the payload small.
+
+    A missing ``scoreboard.json`` / empty dir yields empty ``models`` /
+    ``recent_shows`` (tolerance philosophy mirrors ``score.py``), never raises.
+    """
+    board_dir = Path(scorecards_dir)
+
+    models: dict[str, Any] = {}
+    board_path = board_dir / "scoreboard.json"
+    if board_path.exists():
+        try:
+            board = json.loads(board_path.read_text(encoding="utf-8"))
+            models = board.get("models") or {}
+        except (json.JSONDecodeError, OSError):
+            models = {}
+
+    # The heuristic baseline, plus the caller's own track when a label is given.
+    wanted_keys = ["heuristic"]
+    if model_label is not None:
+        wanted_keys.append(f"mcp:{model_label}")
+
+    # Most recent scored shows: every {showdate}.json except scoreboard.json,
+    # showdate (filename stem) DESC, capped at `recent`.
+    card_paths = sorted(
+        (p for p in board_dir.glob("*.json") if p.name != "scoreboard.json"),
+        key=lambda p: p.stem,
+        reverse=True,
+    )[: max(recent, 0)]
+
+    recent_shows: list[dict[str, Any]] = []
+    for p in card_paths:
+        try:
+            card = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        sources = card.get("sources") or {}
+        summary_sources: dict[str, Any] = {}
+        for key in wanted_keys:
+            src = sources.get(key)
+            if src is None:
+                continue
+            summary_sources[key] = {
+                "metrics": src.get("metrics"),
+                "best_call": src.get("best_call"),
+                "biggest_whiff": src.get("biggest_whiff"),
+            }
+        recent_shows.append(
+            {
+                "showdate": card.get("showdate"),
+                "venue_name": card.get("venue_name"),
+                "n_played": card.get("n_played"),
+                "sources": summary_sources,
+                "missed_by_all": card.get("missed_by_all") or [],
+            }
+        )
+
+    return {"models": models, "recent_shows": recent_shows}
+
+
 # ---------------------------------------------------------------------------
 # Write tool
 # ---------------------------------------------------------------------------
@@ -432,8 +585,9 @@ def submit_prediction(
     ``out_dir/{model_label}/{showdate}.json`` per DEPLOY-CONTRACTS.md §5.
 
     ``predictions`` is a list of ``{"slug": str, "prob": float}`` with prob in
-    (0, 1]. Unknown slugs, empty submissions, out-of-range/non-numeric probs,
-    and duplicate slugs all raise ``ValueError`` with a clear message. Never
+    (0, 1] and between 20 and 40 songs. Unknown slugs, empty submissions,
+    out-of-range/non-numeric probs, duplicate slugs, and a shortlist shorter than
+    20 or longer than 40 all raise ``ValueError`` with a clear message. Never
     touches core tables -- this only ever writes to the submissions inbox
     (deploy plan §9: treat submissions as untrusted input).
 
@@ -490,6 +644,14 @@ def submit_prediction(
         seen.add(slug)
         slugs.append(slug)
         scores.append(prob)
+
+    # Shortlist length bounds (§5): a live model track commits to a 20–40 song
+    # shortlist. Checked after the per-entry validation so bad rows surface first.
+    if not (_MIN_SHORTLIST <= len(slugs) <= _MAX_SHORTLIST):
+        raise ValueError(
+            f"predictions must have between {_MIN_SHORTLIST} and {_MAX_SHORTLIST} "
+            f"songs, got {len(slugs)}"
+        )
 
     # Store probs as submitted (clamped). publish renormalizes to K at fold time.
     rows = sorted(
