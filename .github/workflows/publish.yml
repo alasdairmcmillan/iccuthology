@@ -40,6 +40,7 @@ jobs:
         run: >
           uv run phishpred publish --out build/snapshots $MODEL_PARAMS
           --with-samples --with-catalog --submitted data/predictions/submitted
+          --frozen data/frozen
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
@@ -63,6 +64,21 @@ jobs:
       - name: Freeze show docs to R2
         if: steps.gate.outputs.changed == 'true'
         run: uv run python scripts/r2_push.py build/snapshots/show frozen/show
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+
+      # Freeze-once tour predictions (DEPLOY-CONTRACTS §3): publish stages the
+      # authoritative per-tour prediction doc (the R2-pulled frozen copy when it
+      # exists, else the first fresh sim) to build/snapshots/tour_frozen. Pushing
+      # it to frozen/tour is idempotent/immutable — a seeded backcast is never
+      # overwritten. The frozen/ pull above already mirrors frozen/tour ->
+      # data/frozen/tour, so publish reads it back on the next run.
+      - name: Freeze tour predictions to R2
+        if: steps.gate.outputs.changed == 'true'
+        run: uv run python scripts/r2_push.py build/snapshots/tour_frozen frozen/tour
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

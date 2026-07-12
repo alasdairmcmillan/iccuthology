@@ -419,11 +419,24 @@ export default function ShowsScreen({
     () => new Set((activeScorecard?.missed_by_all ?? []).map((s) => s.slug)),
     [activeScorecard],
   );
+  // Played songs the SHOWN take's shortlist called — highlighted on the
+  // actual-setlist chips so the model's coverage reads at a glance.
+  const modelHitSlugs = useMemo(
+    () => new Set((shownTake?.rows ?? []).filter((r) => r.hit).map((r) => r.slug)),
+    [shownTake],
+  );
   const playedChip = (s: { slug: string; song: string }) =>
     missedByAllSlugs.has(s.slug) ? (
       <span className="played-chip miss" key={s.slug} title="predicted by nobody">
         <span className="chip-x" aria-hidden="true">
           ×
+        </span>
+        {s.song}
+      </span>
+    ) : modelHitSlugs.has(s.slug) ? (
+      <span className="played-chip hit" key={s.slug} title="in this model's shortlist">
+        <span className="chip-x" aria-hidden="true">
+          ✓
         </span>
         {s.song}
       </span>
@@ -588,7 +601,8 @@ export default function ShowsScreen({
             <span className="card-title">Run view</span>
           </div>
           <div className="card-sub" style={{ marginTop: 4 }}>
-            Probability of hearing each song at least once across the selected run.
+            Probability of hearing each song at least once across the selected run,
+            according to a heuristic model.
           </div>
           <div className="run-grid-head">
             <span>Song</span>
@@ -626,7 +640,7 @@ export default function ShowsScreen({
         {/* CARD B: SETLISTS */}
         <div className="card shows-card">
           <div className="setlist-head">
-            <span className="card-title">Proposed setlist</span>
+            <span className="card-title">Setlist calls</span>
             <div className="setlist-controls">
               <div className="control">
                 <span className="control-label">Run night:</span>
@@ -658,10 +672,17 @@ export default function ShowsScreen({
               </div>
               {sourceForNight?.versions && sourceForNight.versions.length > 0 && (
                 <span className="rev-badge">
-                  rev {sourceForNight.versions.length + 1} · updated after last night
+                  rev {sourceForNight.versions.length + 1}
+                  {sourceForNight.submitted_at
+                    ? ` · updated ${dateLabelShort(sourceForNight.submitted_at.slice(0, 10))}`
+                    : " · updated after last night"}
                 </span>
               )}
             </div>
+          </div>
+          <div className="card-sub" style={{ marginTop: 4, marginBottom: 14 }}>
+            Hypothetical setlists from competing heuristic and AI models; click{" "}
+            <em>Past scorecards</em> above for standings
           </div>
 
           {!modelHasSetlist && !sourceForNight ? (
@@ -703,13 +724,6 @@ export default function ShowsScreen({
                 ))
               ) : (
                 <>
-                  {/* The model's own narrative leads — it frames the picks below. */}
-                  {sourceForNight!.rationale && (
-                    <div className="rationale">
-                      <span className="rationale-kicker">Rationale</span>
-                      <p className="rationale-body">{sourceForNight!.rationale}</p>
-                    </div>
-                  )}
                   {/* A structured setlist call (§2/§5) is a stronger prediction than
                       the flat ranked shortlist — prefer it when present, and keep the
                       shortlist below for the full picture. */}
@@ -725,6 +739,14 @@ export default function ShowsScreen({
                         ))}
                       </div>
                     ))}
+                  {/* The model's own narrative sits between the setlist call and the
+                      shortlist — it frames both without leading the card. */}
+                  {sourceForNight!.rationale && (
+                    <div className="rationale">
+                      <span className="rationale-kicker">Rationale</span>
+                      <p className="rationale-body">{sourceForNight!.rationale}</p>
+                    </div>
+                  )}
                   <div className="set-section">
                     <div className="set-label">Predicted songs · P(played)</div>
                     {sourceForNight!.rows.map((r, i) => (
@@ -768,11 +790,11 @@ export default function ShowsScreen({
                     {sortHeader("n_shows", "Shows", METRIC_TIPS.shows)}
                     {sortHeader("hit_rate_top20", "Hit·20", hitRateTip(20))}
                     {sortHeader("recall", "Recall", METRIC_TIPS.recall)}
+                    {sortHeader("setlist_hit_rate", "Setlist", METRIC_TIPS.setlistHitRate)}
+                    {sortHeader("placed_rate", "Placed", METRIC_TIPS.placedRate)}
                     {sortHeader("brier", "Brier", METRIC_TIPS.brier)}
                     {sortHeader("avg_n_rows", "List", METRIC_TIPS.list)}
                     {sortHeader("vs_heuristic", "vs heur", METRIC_TIPS.vsHeuristic)}
-                    {sortHeader("setlist_hit_rate", "Setlist", METRIC_TIPS.setlistHitRate)}
-                    {sortHeader("placed_rate", "Placed", METRIC_TIPS.placedRate)}
                     {sortHeader("sharpshooters", "Sharp", METRIC_TIPS.sharp)}
                     {sortHeader("refresh_gain", "Refresh gain", METRIC_TIPS.refreshGain)}
                   </div>
@@ -786,6 +808,18 @@ export default function ShowsScreen({
                       </span>
                       <span className="standings-val" style={{ textAlign: "right" }}>
                         {pct1(m.recall)}
+                      </span>
+                      <span
+                        className={m.setlist ? "standings-val" : "standings-dim"}
+                        style={{ textAlign: "right" }}
+                      >
+                        {m.setlist ? pct1(m.setlist.hit_rate) : "—"}
+                      </span>
+                      <span
+                        className={m.setlist ? "standings-val" : "standings-dim"}
+                        style={{ textAlign: "right" }}
+                      >
+                        {m.setlist ? pct1(m.setlist.placed_rate) : "—"}
                       </span>
                       <span style={{ textAlign: "right" }}>{m.brier.toFixed(3)}</span>
                       <span style={{ textAlign: "right" }}>{m.avg_n_rows.toFixed(1)}</span>
@@ -804,18 +838,6 @@ export default function ShowsScreen({
                           —
                         </span>
                       )}
-                      <span
-                        className={m.setlist ? "standings-val" : "standings-dim"}
-                        style={{ textAlign: "right" }}
-                      >
-                        {m.setlist ? pct1(m.setlist.hit_rate) : "—"}
-                      </span>
-                      <span
-                        className={m.setlist ? "standings-val" : "standings-dim"}
-                        style={{ textAlign: "right" }}
-                      >
-                        {m.setlist ? pct1(m.setlist.placed_rate) : "—"}
-                      </span>
                       <span className="standings-dim" style={{ textAlign: "right" }}>
                         {m.setlist ? m.setlist.sharpshooters : "—"}
                       </span>
@@ -1150,9 +1172,15 @@ export default function ShowsScreen({
                           {activeScorecard.played.map(playedChip)}
                         </div>
                       )}
-                      {activeScorecard.missed_by_all.length > 0 && (
+                      {(modelHitSlugs.size > 0 ||
+                        activeScorecard.missed_by_all.length > 0) && (
                         <div className="note" style={{ marginTop: 6 }}>
-                          × = in nobody's shortlist
+                          {modelHitSlugs.size > 0 && "✓ = in this model's shortlist"}
+                          {modelHitSlugs.size > 0 &&
+                            activeScorecard.missed_by_all.length > 0 &&
+                            " · "}
+                          {activeScorecard.missed_by_all.length > 0 &&
+                            "× = in nobody's shortlist"}
                         </div>
                       )}
                     </div>

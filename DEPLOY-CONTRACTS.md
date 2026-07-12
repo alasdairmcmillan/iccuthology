@@ -60,9 +60,58 @@ schedule.json                 # full future schedule for the UI
 ```
 
 `tour/{tour_id}.json` is the identical shape to `tour.json`, reduced over only
-that tour's horizon positions from the SAME single simulation (deploy plan §3).
+that tour's horizon positions from the SAME single simulation (deploy plan §3),
+PLUS the freeze-once + tracker fields below (the all-future `tour.json` stays
+live-sim; the Tours screen renders per-tour docs via `/api/tour/{id}`).
 `--sample-sims N` ships a downsampled `samples.bin` of N sims (smaller client
 download) while the reduced tables keep full `--n-sims` accuracy.
+
+**Freeze-once + tracker (per-tour docs only).** A tour's heuristic prediction is
+frozen ONCE, then the served doc becomes a tracker: frozen predictions + how many
+times each song has actually been played on the tour so far. `publish` takes
+`--frozen DIR` (the local mirror of R2's `frozen/` prefix, e.g. `data/frozen`):
+
+- If `{frozen_dir}/tour/{tour_id}.json` exists, its `rows`/metadata are
+  AUTHORITATIVE — the served `tour/{tour_id}.json` carries those frozen rows
+  verbatim (never re-simulated over), and `publish` re-stages that same doc to
+  `build/snapshots/tour_frozen/{tour_id}.json` (idempotent/immutable re-push).
+- If absent, the freshly simulated per-tour doc is BOTH served and staged to
+  `build/snapshots/tour_frozen/{tour_id}.json` — the degenerate freeze-as-of-
+  this-run fallback.
+
+The workflow pushes `build/snapshots/tour_frozen` → `frozen/tour` (gated on
+`changed`); the `frozen/` → `data/frozen/` restore already mirrors it back.
+
+The intended seeding path is a BACKCAST, not the fallback:
+`phishpred backcast-tour {tour_id} --out data/frozen` copies the DB, scrubs every
+show on/after the tour opener to look un-played (NULL `show_index` + delete their
+performance rows — the tour sim reads only `shows`/`performances`/`songs`, all
+`show_index`-gated, so this fully blinds the feature pipeline), then runs the
+normal tour simulation over the whole tour horizon: what today's heuristic would
+have predicted the day before the opener. Its doc adds `"backcast": true` and
+`"as_of_showdate": <last pre-tour played show>` so the UI can say "pre-tour"
+honestly. Deterministic given `seed`.
+
+Every served per-tour doc adds a `tracker` (time-varying — refreshed each publish,
+never part of the frozen doc):
+```json
+{
+  "epoch": "...", "model": "heuristic", "rows": [ ... ],   // frozen predictions
+  "backcast": true,                    // present only on backcast-seeded docs
+  "as_of_showdate": "2026-07-06",      // present only on backcast-seeded docs
+  "tracker": {
+    "n_shows_played": 4,               // indexed (played) shows in this tour so far
+    "n_shows_total": 21,               // all non-excluded shows in the tour
+    "played_counts": {"tweezer": 2, "harry-hood": 1},  // slug -> # played tour shows featuring it (distinct per show)
+    "as_of": "2026-07-12T00:00:00Z"    // = meta.created_at (injectable; never a bare now())
+  }
+}
+```
+A tour's shows are every non-excluded show whose `tour_name` maps to `tour_id`
+(`tour_id_for`); its PLAYED shows are the `show_index IS NOT NULL` complement of
+`_future_schedule`. As tour shows play they leave the horizon, so the frozen
+`rows` stop drifting toward "remaining shows only" while `tracker.played_counts`
+grows.
 
 ### meta.json
 ```json
@@ -118,9 +167,11 @@ Rows sorted by `expected_plays` desc. Buckets per `modes._bucket_for`.
       "rows": [
         {"song": "Harry Hood", "slug": "harry-hood", "prob": 0.61, "gap": 7,
          "drivers": ["rate=0.310", "due x1.4"]}
-      ]
+      ],
+      "setlist": {"sets": {"1": [{"slug","song"},...], "2": [...], "e": [...]}}  // §8; the deterministic sampled setlist, so the statistical headline is scored on the placement benchmark too
     }
-    // "lr", "gbm": same shape when --compare-models includes them.
+    // "lr", "gbm": same shape when --compare-models includes them (rows only —
+    //   only the HEADLINE model carries a sampled `setlist`).
     // "llm:anthropic": {"model": "llm:anthropic:claude-sonnet-5", "kind": "llm", "rows": [...]}
     //   when --compare-models includes an llm:<provider>[:<model-id>] spec.
     // "mcp:<label>": {"model": "...", "kind": "mcp", "rationale": "...", "submitted_at": "...", "rows": [...],
@@ -137,7 +188,12 @@ setlist would corrupt the placement benchmark. Setlist slugs are resolved to
 `{"slug","song"}` objects at fold time.
 Each `sources[*].rows` sorted by `prob` desc. Statistical/LLM rows come from
 `predict_show` / `models.llm`; both are floored and renormalized to K the same
-way. The source key is the `--compare-models` string as passed; the `model`
+way. The HEADLINE statistical source additionally carries a `setlist` — the same
+deterministic `sample_setlist` call published to `setlist/{showdate}.json`,
+folded to the `{"sets": {label: [{"slug","song"},...]}}` shape (identical to a
+submitted mcp setlist) so `score.py` scores it on the setlist benchmark (§8)
+instead of leaving its `setlist_score` perpetually null. Compare/LLM sources have
+no sampled setlist and sit out that benchmark. The source key is the `--compare-models` string as passed; the `model`
 field is the resolved name (a defaulted model id filled in). An `llm:*` compare
 source whose call fails (missing provider API key, network, malformed response)
 is dropped for the rest of the batch with a stderr warning — publish never

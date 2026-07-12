@@ -99,6 +99,141 @@ def _slice_result(result: SimResult, positions: list[int], showids: list[int]) -
     )
 
 
+def _tour_tracker(conn: sqlite3.Connection, tour_id: str, as_of: str | None) -> dict:
+    """Per-tour "plays-so-far" tracker (DEPLOY-CONTRACTS §3): how many of the
+    tour's shows have been played (indexed) and, per song, how many of those
+    played shows featured it.
+
+    A tour's shows are every non-excluded show whose ``tour_name`` maps to
+    ``tour_id`` (``tour_id_for``); its PLAYED shows are the complement of
+    ``_future_schedule``'s ``show_index IS NULL`` filter (indexed = already
+    ingested). Counts are DISTINCT-show per song, matching the tour-rotation
+    feature (``_State.tour_play_count`` increments once per song per show over a
+    set of distinct songids). ``as_of`` is the injectable ``created_at`` — never
+    a bare now() (keeps ``compute_epoch``/reproducibility intact)."""
+    played_showids: list[int] = []
+    n_total = 0
+    for r in conn.execute(
+        "SELECT showid, tour_name, show_index FROM shows WHERE exclude = 0"
+    ):
+        if tour_id_for(r["tour_name"]) != tour_id:
+            continue
+        n_total += 1
+        if r["show_index"] is not None:
+            played_showids.append(int(r["showid"]))
+
+    counts: dict[str, int] = {}
+    if played_showids:
+        placeholders = ",".join("?" for _ in played_showids)
+        for row in conn.execute(
+            "SELECT so.slug AS slug, COUNT(DISTINCT p.showid) AS c "
+            "FROM performances p JOIN songs so ON so.songid = p.songid "
+            f"WHERE p.showid IN ({placeholders}) GROUP BY p.songid",
+            played_showids,
+        ):
+            counts[row["slug"]] = int(row["c"])
+
+    return {
+        "n_shows_played": len(played_showids),
+        "n_shows_total": n_total,
+        "played_counts": counts,
+        "as_of": as_of,
+    }
+
+
+def _load_frozen_tour(frozen_dir: Path | str | None, tour_id: str) -> dict | None:
+    """The frozen per-tour prediction doc at ``{frozen_dir}/tour/{tour_id}.json``
+    (the local mirror of R2's ``frozen/tour`` prefix), or ``None`` when there is
+    no frozen doc yet. When present, its rows/metadata are authoritative — the
+    served doc never re-simulates over them (DEPLOY-CONTRACTS §3 freeze-once)."""
+    if frozen_dir is None:
+        return None
+    path = Path(frozen_dir) / "tour" / f"{tour_id}.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"publish: ignoring unreadable frozen tour doc {path}: {exc}", file=sys.stderr)
+        return None
+
+
+def _scrub_for_backcast(conn: sqlite3.Connection, cutoff_showdate: str) -> None:
+    """Blind the feature pipeline to a tour: make every show on/after
+    ``cutoff_showdate`` look un-played on a WRITABLE COPY of the DB.
+
+    The tour simulation path reads only ``shows``/``performances``/``songs``
+    (via ``features.build_state_to_now`` / ``mean_setlist_size`` /
+    ``future_show_ids`` / ``future_run_start`` — all gated on
+    ``show_index IS NOT NULL`` for history), with no derived/cached tables at
+    request time. So NULLing ``show_index`` and deleting the performance rows for
+    the cutoff-and-later shows leaves the pipeline with exactly the pre-tour
+    state: those shows become future (un-indexed), carry no setlist, and are
+    invisible to gap/last-played/tour-rotation/era-rate/K features. MUTATES the
+    connection — the caller must pass a disposable copy (see ``backcast_tour``)."""
+    showids = [int(r["showid"]) for r in conn.execute(
+        "SELECT showid FROM shows WHERE showdate >= ?", (cutoff_showdate,)
+    )]
+    conn.executemany("DELETE FROM performances WHERE showid = ?", [(s,) for s in showids])
+    conn.execute("UPDATE shows SET show_index = NULL WHERE showdate >= ?", (cutoff_showdate,))
+    conn.commit()
+
+
+def backcast_tour(
+    conn: sqlite3.Connection,
+    tour_id: str,
+    *,
+    n_sims: int = 2000,
+    model: str = "heuristic",
+    seed: int = 0,
+    half_life: int = 50,
+) -> dict:
+    """Back-compute the frozen pre-tour prediction for ``tour_id`` (DEPLOY-
+    CONTRACTS §3): what today's heuristic would have predicted the day before the
+    tour opener, with zero information about the tour itself.
+
+    Runs on the passed connection, which MUST be a writable, disposable COPY of
+    the DB (this scrubs it). Scrubs every show on/after the tour's first date to
+    look un-played, then runs the normal tour simulation over the whole tour
+    horizon and returns a ``_tour_doc``-shaped dict tagged ``{"backcast": true,
+    "as_of_showdate": <last pre-tour played show>}``. Deterministic given
+    ``seed``. Raises ``ValueError`` if the tour has no shows."""
+    tour_rows = [
+        r for r in conn.execute(
+            "SELECT showid, showdate, tour_name FROM shows "
+            "WHERE exclude = 0 ORDER BY showdate, showid"
+        )
+        if tour_id_for(r["tour_name"]) == tour_id
+    ]
+    if not tour_rows:
+        raise ValueError(f"no shows for tour {tour_id!r}")
+    cutoff = str(tour_rows[0]["showdate"])
+
+    # Last pre-tour played show — the honest "as of" date the backcast knew
+    # (captured BEFORE the scrub un-indexes everything).
+    pre = conn.execute(
+        "SELECT showdate FROM shows WHERE show_index IS NOT NULL AND exclude = 0 "
+        "AND showdate < ? ORDER BY show_index DESC LIMIT 1",
+        (cutoff,),
+    ).fetchone()
+    as_of_showdate = str(pre["showdate"]) if pre is not None else None
+
+    _scrub_for_backcast(conn, cutoff)
+
+    # After the scrub the tour's shows are future (show_index NULL); simulate the
+    # whole tour horizon in showdate order.
+    tour_showids = [int(r["showid"]) for r in tour_rows]
+    cfg = SimConfig(n_sims=n_sims, seed=seed, model=model, half_life=half_life)
+    result: SimResult = simulate_horizon(conn, tour_showids, cfg)
+    epoch, _components = compute_epoch(
+        conn, model=model, n_sims=n_sims, seed=seed, half_life=half_life,
+    )
+    doc = _tour_doc(tour_mode(conn, tour_showids, cfg, result=result), epoch)
+    doc["backcast"] = True
+    doc["as_of_showdate"] = as_of_showdate
+    return doc
+
+
 def _as_of(conn: sqlite3.Connection) -> tuple[str | None, int | None]:
     row = conn.execute(
         "SELECT showdate, show_index FROM shows "
@@ -348,6 +483,7 @@ def publish(
     with_catalog: bool = False,
     compare_models: list[str] | None = None,
     submitted_dir: Path | str | None = None,
+    frozen_dir: Path | str | None = None,
     created_at: str | None = None,
 ) -> dict:
     """Write the full snapshot tree under `out_dir` and return meta.json's dict.
@@ -358,8 +494,14 @@ def publish(
     (typically a missing provider API key in the scheduled workflow) is skipped
     with a stderr warning instead of crashing the batch. `sample_sims` (<= n_sims) ships a downsampled
     samples.bin for a smaller client download while the reduced tables keep the
-    full n_sims accuracy (deploy plan §11). `created_at` is injectable for
-    reproducible tests (defaults to now, UTC)."""
+    full n_sims accuracy (deploy plan §11). `frozen_dir` is the local mirror of
+    R2's `frozen/` prefix (e.g. `data/frozen`): when a `{frozen_dir}/tour/
+    {tour_id}.json` exists its rows/metadata are authoritative and are NOT
+    re-simulated over — the served per-tour doc carries those frozen predictions
+    plus a freshly-computed plays-so-far tracker (DEPLOY-CONTRACTS §3). When
+    absent, the freshly simulated per-tour doc is both served and staged to
+    `{out}/tour_frozen/{tour_id}.json` for the workflow to push to `frozen/tour`.
+    `created_at` is injectable for reproducible tests (defaults to now, UTC)."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     created_at = created_at or utc_now_iso()
@@ -425,8 +567,22 @@ def publish(
         for tid, showids in per_tour.items():
             positions = [pos_of[sid] for sid in showids]
             sub = _slice_result(result, positions, showids)
-            _write_json(out / "tour" / f"{tid}.json",
-                        _tour_doc(tour_mode(conn, showids, cfg, result=sub), epoch))
+            fresh_doc = _tour_doc(tour_mode(conn, showids, cfg, result=sub), epoch)
+            tracker = _tour_tracker(conn, tid, created_at)
+            # Freeze-once (DEPLOY-CONTRACTS §3): a frozen doc (ideally a pre-tour
+            # backcast) is authoritative — serve its rows verbatim; only the
+            # tracker refreshes. Absent a frozen doc, freeze the fresh sim now
+            # (the degenerate freeze-as-of-this-run fallback).
+            frozen_doc = _load_frozen_tour(frozen_dir, tid)
+            served = dict(frozen_doc) if frozen_doc is not None else dict(fresh_doc)
+            served.pop("tracker", None)               # tracker is time-varying, never frozen
+            stage = {k: v for k, v in served.items() if k != "tracker"}
+            served["tracker"] = tracker
+            _write_json(out / "tour" / f"{tid}.json", served)
+            # Stage the frozen prediction (predictions only) for the workflow to
+            # push to frozen/tour. Re-staging an existing frozen doc is
+            # idempotent/immutable; staging the fresh sim seeds it the first time.
+            _write_json(out / "tour_frozen" / f"{tid}.json", stage)
     else:
         _write_json(out / "tour.json", {"epoch": epoch, "horizon_showdates": [], "model": model,
                                         "n_sims": n_sims, "half_life": half_life, "rows": []})
@@ -480,6 +636,19 @@ def publish(
             exclude_songids=run_played if same_run else None,
             discourage_songids=None if same_run else (prev_night or None),
         )
+        # Fold the sampled heuristic setlist onto the headline (statistical)
+        # source so it is scored on the setlist benchmark too (§2/§8), exactly
+        # like _fold_setlist emits for mcp sources ({"sets": {label:
+        # [{"slug","song"},...]}}). Only the headline model has a sampled
+        # setlist; compare_models sources do not. `headline_src` is the same
+        # dict already stored in show_docs[showdate]["sources"][model], so this
+        # mutation lands in the doc written after the loop.
+        headline_src["setlist"] = {
+            "sets": {
+                label: [{"slug": s.slug, "song": s.song_name} for s in songs]
+                for label, songs in setlist.sets.items()
+            }
+        }
         placed = {s.songid for songs in setlist.sets.values() for s in songs}
         run_played |= placed
         prev_night = placed

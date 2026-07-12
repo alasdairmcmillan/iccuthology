@@ -452,6 +452,167 @@ def test_catalog_absent_without_flag(conn, tmp_path):
     assert not (tmp_path / "catalog.json").exists()
 
 
+# ---------------------------------------------------------------------------
+# Feature A — headline source carries the sampled setlist (§2/§8)
+# ---------------------------------------------------------------------------
+def test_headline_source_carries_sampled_setlist(conn, tmp_path):
+    publish(conn, tmp_path, n_sims=N_SIMS, seed=SEED)
+    show = json.loads((tmp_path / "show" / "2026-07-10.json").read_text())
+    src = show["sources"]["heuristic"]
+    assert "setlist" in src, "headline source should carry the sampled setlist"
+    sets = src["setlist"]["sets"]
+    assert sets, "expected at least one set"
+    # folded shape matches _fold_setlist: {"slug","song"} objects, keys in order.
+    first_song = next(iter(sets.values()))[0]
+    assert list(first_song.keys()) == ["slug", "song"]
+    # equals the published setlist doc's songs (same deterministic sampler).
+    setlist_doc = json.loads((tmp_path / "setlist" / "2026-07-10.json").read_text())
+    for label, songs in setlist_doc["sets"].items():
+        assert [s["slug"] for s in songs] == [x["slug"] for x in sets[label]]
+        assert [s["song_name"] for s in songs] == [x["song"] for x in sets[label]]
+
+
+def test_heuristic_setlist_scores_non_null(conn, tmp_path):
+    """score_show now produces a non-null setlist_score for the statistical
+    headline source (it used to always sit out)."""
+    from phishpred.score import score_show
+
+    publish(conn, tmp_path, n_sims=N_SIMS, seed=SEED)
+    frozen = json.loads((tmp_path / "show" / "2026-07-10.json").read_text())
+    sets = frozen["sources"]["heuristic"]["setlist"]["sets"]
+
+    # Treat the sampled setlist itself as the played setlist so we get real hits.
+    played, played_sets, seen = [], {}, set()
+    for label, songs in sets.items():
+        played_sets[label] = [{"slug": s["slug"], "song": s["song"]} for s in songs]
+        for s in songs:
+            if s["slug"] not in seen:
+                seen.add(s["slug"])
+                played.append({"slug": s["slug"], "song": s["song"]})
+
+    sc = score_show(frozen, played, played_sets)
+    ss = sc["sources"]["heuristic"]["setlist_score"]
+    assert ss is not None
+    assert ss["n_songs"] == sum(len(v) for v in sets.values())
+    # every predicted song was "played" here -> all hits, all placed/exact.
+    assert ss["hit_rate"] == pytest.approx(1.0)
+    assert ss["weighted_score"] == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# Feature B — freeze-once + tracker per-tour docs (§3)
+# ---------------------------------------------------------------------------
+def test_publish_stages_frozen_tour_when_absent(conn, tmp_path):
+    out = tmp_path / "snap"
+    publish(conn, out, n_sims=N_SIMS, seed=SEED, created_at="2026-07-09T00:00:00Z")
+    served = json.loads((out / "tour" / "summer-2026.json").read_text())
+    stage = json.loads((out / "tour_frozen" / "summer-2026.json").read_text())
+    # served carries a tracker; the staged frozen doc does NOT (time-varying).
+    assert "tracker" in served
+    assert "tracker" not in stage
+    assert {k: v for k, v in served.items() if k != "tracker"} == stage
+    assert served["tracker"]["as_of"] == "2026-07-09T00:00:00Z"
+
+
+def test_publish_serves_frozen_tour_rows_and_refreshes_tracker(conn, tmp_path):
+    frozen = tmp_path / "frozen"
+    (frozen / "tour").mkdir(parents=True)
+    frozen_doc = {
+        "epoch": "backcast0000", "horizon_showdates": ["2026-07-10", "2026-07-11", "2026-07-18"],
+        "model": "heuristic", "n_sims": 2000, "half_life": 50,
+        "backcast": True, "as_of_showdate": "2026-07-06",
+        "rows": [{"song": "Frozen Song", "slug": "frozen-song", "expected_plays": 5.0,
+                  "p_at_least_one": 0.99,
+                  "dist": {"0": 0.01, "1": 0.1, "2": 0.2, "3": 0.3, "4+": 0.39},
+                  "bucket": "lock", "analytic_p": 4.0}],
+    }
+    (frozen / "tour" / "summer-2026.json").write_text(json.dumps(frozen_doc))
+
+    out = tmp_path / "snap"
+    publish(conn, out, n_sims=N_SIMS, seed=SEED, frozen_dir=frozen,
+            created_at="2026-07-09T00:00:00Z")
+    served = json.loads((out / "tour" / "summer-2026.json").read_text())
+    # frozen rows/metadata authoritative — NOT re-simulated over.
+    assert served["rows"] == frozen_doc["rows"]
+    assert served["backcast"] is True
+    assert served["as_of_showdate"] == "2026-07-06"
+    # tracker present + refreshed to created_at.
+    assert served["tracker"]["as_of"] == "2026-07-09T00:00:00Z"
+    # re-staged frozen doc is the frozen doc verbatim (idempotent, no tracker).
+    stage = json.loads((out / "tour_frozen" / "summer-2026.json").read_text())
+    assert "tracker" not in stage
+    assert stage["rows"] == frozen_doc["rows"]
+    assert stage["backcast"] is True
+
+
+def test_tour_tracker_counts_played_shows(conn, tmp_path):
+    # Make 2026-07-05 a PLAYED 2026 Summer Tour show (tweezer, wilson).
+    conn.execute(
+        "INSERT INTO shows (showid, showdate, venueid, tour_name, show_index, exclude) "
+        "VALUES (?,?,?,?,?,0)",
+        (1100, "2026-07-05", 1, "2026 Summer Tour", 10),
+    )
+    for pos, sid in enumerate((101, 103)):  # tweezer, wilson
+        conn.execute(
+            "INSERT INTO performances (showid, songid, set_label, position) VALUES (?,?,?,?)",
+            (1100, sid, "1", pos),
+        )
+    conn.commit()
+
+    out = tmp_path / "snap"
+    publish(conn, out, n_sims=N_SIMS, seed=SEED, created_at="2026-07-09T00:00:00Z")
+    tr = json.loads((out / "tour" / "summer-2026.json").read_text())["tracker"]
+    assert tr["n_shows_played"] == 1          # the one played tour show
+    assert tr["n_shows_total"] == 4           # 1 played + 3 future
+    assert tr["played_counts"] == {"tweezer": 1, "wilson": 1}
+    assert tr["as_of"] == "2026-07-09T00:00:00Z"
+
+
+def test_backcast_tour_scrubs_and_returns_full_horizon(conn):
+    from phishpred.publish import backcast_tour
+
+    doc = backcast_tour(conn, "summer-2026", n_sims=N_SIMS, seed=SEED)
+    assert doc["backcast"] is True
+    # Full tour horizon — all 3 tour shows simulated as of the pre-opener state.
+    assert doc["horizon_showdates"] == ["2026-07-10", "2026-07-11", "2026-07-18"]
+    # as_of = last pre-opener played show in the fixture history.
+    assert doc["as_of_showdate"] == "2022-07-11"
+    # The scrub un-indexed the tour shows on the working copy.
+    assert conn.execute(
+        "SELECT show_index FROM shows WHERE showdate='2026-07-10'"
+    ).fetchone()["show_index"] is None
+
+
+def test_backcast_tour_is_blind_to_played_tour_shows():
+    """The backcast must be INDEPENDENT of what actually happened on the tour:
+    injecting a bustout on the opener (indexed + a performance row) must not
+    change the frozen prediction at all, since the scrub removes it."""
+    from phishpred.publish import backcast_tour
+
+    base = db.get_connection(":memory:")
+    db.init_db(base)
+    _populate(base)
+    baseline = backcast_tour(base, "summer-2026", n_sims=N_SIMS, seed=SEED)
+    base.close()
+
+    leaked = db.get_connection(":memory:")
+    db.init_db(leaked)
+    _populate(leaked)
+    # Opener actually played, featuring a rare bustout (filler=105).
+    leaked.execute("UPDATE shows SET show_index = 10 WHERE showdate = '2026-07-10'")
+    leaked.execute(
+        "INSERT INTO performances (showid, songid, set_label, position) VALUES (?,?,?,?)",
+        (1101, 105, "1", 0),
+    )
+    leaked.commit()
+    scrubbed = backcast_tour(leaked, "summer-2026", n_sims=N_SIMS, seed=SEED)
+    leaked.close()
+
+    # Same rows despite the injected tour play -> the scrub fully blinded it.
+    assert scrubbed["rows"] == baseline["rows"]
+    assert scrubbed["as_of_showdate"] == baseline["as_of_showdate"] == "2022-07-11"
+
+
 def test_tour_id_for():
     # Year token is preserved as a suffix so tour identity stays distinct across
     # years (a "Summer Tour" in 2026 != one in 2027).

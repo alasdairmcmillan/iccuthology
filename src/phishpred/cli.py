@@ -317,6 +317,7 @@ def publish(
     with_catalog: bool = typer.Option(False, "--with-catalog", help="Emit catalog.json (history for the personalized 'due to see' view)"),
     compare_models: str = typer.Option(None, "--compare-models", help="Extra per-show columns, comma-separated (e.g. lr,gbm,llm:anthropic)"),
     submitted: str = typer.Option(None, help="Submissions inbox dir to fold in as mcp:<label> sources"),
+    frozen: str = typer.Option(None, "--frozen", help="Local mirror of R2's frozen/ prefix (e.g. data/frozen): frozen/tour/{id}.json predictions become authoritative, tour docs gain a plays-so-far tracker"),
 ) -> None:
     """Compute every publishable artifact for the current epoch -> JSON (+ samples).
 
@@ -330,9 +331,64 @@ def publish(
     meta = _publish(
         get_connection(), out, n_sims=n_sims, model=model, seed=seed, half_life=half_life,
         with_samples=with_samples, sample_sims=sample_sims, with_catalog=with_catalog,
-        compare_models=compare, submitted_dir=submitted,
+        compare_models=compare, submitted_dir=submitted, frozen_dir=frozen,
     )
     typer.echo(f"published epoch {meta['epoch']} -> {out} ({len(meta['horizon_showdates'])} shows)")
+
+
+@app.command("backcast-tour")
+def backcast_tour_cmd(
+    tour_id: str = typer.Argument(..., help="Tour id to freeze (e.g. summer-2026; see meta.json tours[].id)"),
+    out: str = typer.Option("data/frozen", "--out", help="Frozen dir root; writes {out}/tour/{tour_id}.json"),
+    db: str = typer.Option(None, "--db", help="Source DB (default: the configured data/phish.db); it is copied, never mutated"),
+    n_sims: int = typer.Option(2000, "--n-sims", help="Monte-Carlo simulations"),
+    model: str = typer.Option("heuristic", help="heuristic | lr | gbm"),
+    seed: int = typer.Option(0),
+    half_life: int = typer.Option(50),
+) -> None:
+    """Back-compute the FROZEN pre-tour heuristic prediction for one tour and
+    write it to the frozen staging location (DEPLOY-CONTRACTS §3).
+
+    Copies the DB, scrubs every show on/after the tour opener to look un-played,
+    then runs the normal tour simulation over the whole tour horizon — i.e. what
+    today's model would have predicted the day before the opener, blind to the
+    tour. Deterministic given seed. Seeds ``frozen/tour/{tour_id}.json`` so
+    subsequent publishes serve these frozen rows + a live plays-so-far tracker.
+    """
+    import json as _json
+    import shutil
+    import tempfile
+    from pathlib import Path as _Path
+
+    from .config import DB_PATH
+    from .db import get_connection
+    from .modes import _round_floats
+    from .publish import backcast_tour
+
+    src_db = _Path(db) if db else DB_PATH
+    if not src_db.exists():
+        typer.echo(f"DB not found: {src_db}")
+        raise typer.Exit(1)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        copy_db = _Path(tmp) / "backcast.db"
+        shutil.copyfile(src_db, copy_db)
+        conn = get_connection(copy_db)
+        try:
+            doc = backcast_tour(conn, tour_id, n_sims=n_sims, model=model, seed=seed, half_life=half_life)
+        except ValueError as exc:
+            typer.echo(str(exc))
+            raise typer.Exit(1)
+        finally:
+            conn.close()
+
+    dest = _Path(out) / "tour" / f"{tour_id}.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(_json.dumps(_round_floats(doc), ensure_ascii=False), encoding="utf-8")
+    typer.echo(
+        f"backcast {tour_id}: {len(doc['horizon_showdates'])}-show horizon "
+        f"as_of={doc['as_of_showdate']} -> {dest}"
+    )
 
 
 @app.command()
