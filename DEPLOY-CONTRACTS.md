@@ -289,9 +289,12 @@ the R2 `submitted/` prefix). Written by the MCP `submit_prediction` tool, read b
   "versions": [ ... ]                    // OPTIONAL prior submissions, oldest first (see below)
 }
 ```
-`publish` validates: known slugs, probs in (0,1] (booleans rejected), no duplicate
-slugs, and a filesystem-safe label directory; it resolves slug→song_name and emits
-rows sorted by prob. Probs are published AS SUBMITTED (each clamped to <=0.99) and
+The MCP `submit_prediction` tool additionally enforces a shortlist length of 20–40
+songs (a live model track commits to a real shortlist); this bound is an
+MCP-submission rule only — `publish`'s fold and `heuristic_prediction` are
+unaffected. `publish` validates: known slugs, probs in (0,1] (booleans rejected),
+no duplicate slugs, and a filesystem-safe label directory; it resolves
+slug→song_name and emits rows sorted by prob. Probs are published AS SUBMITTED (each clamped to <=0.99) and
 scaled DOWN via `probs.renormalize_to_k` only when their sum exceeds the era's
 expected setlist size K — never scaled up, so a sparse shortlist keeps its stated
 probabilities. `rationale` is truncated to 4000 chars and rows capped at the publish
@@ -393,14 +396,17 @@ be computed from `frozen/show/{showdate}.json`, never from a current-epoch
 artifact. The frozen file's own `epoch` field records provenance. Shows played
 before `frozen/` existed have no frozen file and are simply unscoreable.
 
-**Scoring.** `phishpred score --frozen DIR --out DIR [--rescore-days 7]`
+**Scoring.** `phishpred score --frozen DIR --out DIR [--rescore-days 7] [--force]`
 (new `src/phishpred/score.py`). For each `frozen/show/{showdate}.json` whose
 show is indexed in the DB (played, `show_index IS NOT NULL`) and
 `showdate < UTC today`: compute the scorecard and write
 `{out}/{showdate}.json`. If a scorecard already exists it is skipped, UNLESS
 `showdate >= UTC today - rescore_days` — inside that window scoring is
 idempotent-rewrite, so late setlist corrections and partially-ingested
-west-coast shows self-heal on the next run. Afterwards ALWAYS rebuild
+west-coast shows self-heal on the next run. `--force` bypasses the skip and
+rescores EVERY eligible show regardless of an existing scorecard — for
+metric-definition changes (e.g. a top-N cutover) that must propagate to every
+old card in one pass. Afterwards ALWAYS rebuild
 `{out}/scoreboard.json` from every scorecard present (empty shows/models
 lists are valid). The played set is the show's DISTINCT performed slugs.
 
@@ -421,8 +427,9 @@ lists are valid). The played set is the show's DISTINCT performed slugs.
     "heuristic": {
       "model": "heuristic", "kind": "statistical", "n_rows": 40,
       "metrics": {
-        "hits_top10": 6,          // hits among the first min(10, n_rows) rows (rows are prob desc)
-        "hit_rate_top10": 0.6,    // hits_top10 / min(10, n_rows)
+        "top_n": 20,              // the top-N cutoff (published so consumers never hardcode N)
+        "hits_top20": 6,          // hits among the first min(20, n_rows) rows (rows are prob desc)
+        "hit_rate_top20": 0.6,    // hits_top20 / min(20, n_rows)
         "recall": 0.4286,         // |played ∩ shortlist| / n_played
         "brier": 0.081,           // mean over rows of (prob - hit)^2
         "log_loss": 0.31          // mean over rows of -(y·ln p + (1-y)·ln(1-p)), p clamped to [0.001, 0.999]
@@ -452,9 +459,10 @@ sit out and are excluded from scoreboard setlist aggregates):
 ```json
 {
   "n_songs": 18,
-  "sets": {"1": [{"slug","song","hit","placed"},...], "2": [...], "e": [...]},  // predicted setlist, annotated
+  "sets": {"1": [{"slug","song","hit","placed","exact"},...], "2": [...], "e": [...]},  // predicted setlist, annotated
   "hits": 9, "hit_rate": 0.5,        // predicted songs played ANYWHERE / n_songs
   "placed": 6, "placed_rate": 0.6667,// of hits: played in the PREDICTED set (denominator = hits; 0/0 -> 0)
+  "weighted_score": 0.6667,          // (hits + placed + exact_calls) / (3 * n_songs); 0.0 when n_songs is 0
   "marquee": {                       // positional bragging rights, vs played_sets
     "opener": true,                  //   predicted sets["1"][0] == played_sets["1"][0]
     "set1_closer": false,            //   predicted last of set 1 == actual last of set 1
@@ -469,7 +477,11 @@ sit out and are excluded from scoreboard setlist aggregates):
 Marquee flags compare only set keys present on BOTH sides; a predicted set the
 band never played (e.g. a called "3") contributes misses to hit/placed but no
 marquee slots. `exact_calls` subsumes opener/closer positions — the badge is
-about ordering, the marquee flags are the story stats.
+about ordering, the marquee flags are the story stats. Each song's `exact` flag
+(predicted `sets[s][i] == played_sets[s][i]`) is annotated per row; `exact_calls`
+is the count of exact rows, and `exact` ⊆ `placed` ⊆ `hit` by construction.
+`weighted_score` tiers those three by specificity — 1 point for a hit, +1 for the
+right set, +1 for the exact slot — so an all-exact call scores 1.0.
 
 **Version scoring** (`versions`): every PRIOR frozen take is scored with the
 same machinery, oldest first — the top-level source entry IS the final take
@@ -495,23 +507,37 @@ slop, documented here so nobody litigates it later.
      "source_keys": ["heuristic", "mcp:claude-fable"]}
   ],
   "models": {                                // unweighted means over scored shows (FINAL takes only)
-    "heuristic": {"kind": "statistical", "n_shows": 3, "hit_rate_top10": 0.55,
+    "heuristic": {"kind": "statistical", "n_shows": 3, "hit_rate_top20": 0.55,
                   "recall": 0.41, "brier": 0.09, "log_loss": 0.29,
+                  "avg_n_rows": 37.5,                // mean shortlist length over scored shows
                   "setlist": {                       // absent when no setlist-scored shows
                     "n_shows": 2, "hit_rate": 0.44, "placed_rate": 0.61,
+                    "weighted_score": 0.55,          // unweighted mean of per-show weighted_score
                     "marquee_calls": 5, "exact_calls": 3, "sharpshooters": 1
                   },
                   "refresh_gain": {                  // absent when no multi-take shows; the Monty Hall dividend
                     "n_shows": 2,                    //   shows with >= 1 prior version
-                    "mean_hit_rate_top10_delta": 0.15,   // mean(final - first take)
+                    "mean_hit_rate_top20_delta": 0.15,   // mean(final - first take)
                     "mean_recall_delta": 0.08
+                  }},
+    "mcp:claude-opus": {"kind": "mcp", "n_shows": 3, "hit_rate_top20": 0.6,
+                  "recall": 0.5, "brier": 0.08, "log_loss": 0.25, "avg_n_rows": 28.0,
+                  "vs_heuristic": {                  // absent for the heuristic itself + when 0 paired shows
+                    "n_shows": 3,                    //   shows where BOTH this model and heuristic scored
+                    "hit_rate_top20_delta": 0.05,    // mean(model - heuristic)
+                    "recall_delta": 0.09
                   }}
   }
 }
 ```
 `setlist.marquee_calls`/`exact_calls`/`sharpshooters` are TOTALS over scored
-shows (they're counting stats); `hit_rate`/`placed_rate` are unweighted means.
+shows (they're counting stats); `hit_rate`/`placed_rate`/`weighted_score` are
+unweighted means.
 `refresh_gain` compares each show's FIRST take against its final one.
+`avg_n_rows` is the unweighted mean of the source's `n_rows` across its scored
+shows (shortlists vary 20–40 now). `vs_heuristic` is a paired comparison against
+the `heuristic` source over shows where BOTH scored — omitted for the heuristic
+itself and when zero shows are paired.
 
 **Workflow wiring** (`.github/workflows/publish.yml`): the restore step also
 pulls `frozen/` → `data/frozen/` and `scorecards/` → `data/scorecards/`; every

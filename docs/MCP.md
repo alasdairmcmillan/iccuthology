@@ -83,7 +83,11 @@ enforce for the CLI), so an agent can't accidentally "see the future."
 | `recent_setlists(n=10)` | The last `n` played shows' setlists, oldest first, for tour context. |
 | `run_context(showdate)` | The multi-night run a show belongs to (same venue, contiguous), including already-played nights' setlists and still-future nights. |
 | `heuristic_prediction(showdate, half_life=50, top=30)` | The statistical heuristic baseline (`predict_show`, model="heuristic") as JSON, so the agent has something concrete to agree or disagree with. |
-| `submit_prediction(showdate, model_label, predictions, rationale=None, setlist=None)` | **Write tool.** Submits per-song probabilities (and a structured setlist call) for a future show. |
+| `show_length_stats(years=10)` | Songs-per-show averages (overall + by year) over the last `years` calendar years, anchored on the latest played show. Calibration context: `avg_distinct_songs` (~18–19 in the current era) is what a shortlist is scored against, and probs should sum near it. |
+| `slot_propensities(slugs)` | Batch set-position tendencies: per song, P(slot \| played) over `set{1,2,3}-{open,mid,close}`/`encore` (era-weighted) plus the current era's set-structure stats (sets per show, songs per set). The data behind placement scoring — check it before calling openers/closers/encores. Unknown slugs come back under `unknown_slugs`. |
+| `backtest_shortlist(slugs, n_shows=20)` | Score a hypothetical shortlist against the last `n_shows` played shows: per-show hits/hit_rate/recall, means, and per-slug hit counts. Test a working hypothesis before submitting it. Leakage-free (played history only); remember rotation — past-window frequency ≠ next-show probability. |
+| `scoreboard(model_label=None, recent=5)` | Your own track record + the heuristic baseline from the published scorecards tier, so you can calibrate before submitting. Returns the per-model aggregate `models` (incl. `avg_n_rows` and `vs_heuristic`) and a compact `recent_shows` summary. Leakage-safe (scorecards only exist for already-played shows). |
+| `submit_prediction(showdate, model_label, predictions, rationale=None, setlist=None)` | **Write tool.** Submits per-song probabilities (20–40 songs) and a structured setlist call for a future show. |
 
 ### `submit_prediction`
 
@@ -107,10 +111,12 @@ model track should submit one** — the scoreboard's two-benchmark scorecards
 only work if models actually call setlists. See the agent playbook below.
 
 Behavior:
-- Rejects empty submissions, unknown slugs, duplicate slugs, and
-  out-of-range/non-numeric probabilities with a clear `ValueError`; an
-  invalid `setlist` (bad set label, unknown/duplicate slug, >40 songs) also
-  raises, before anything is written.
+- Rejects empty submissions, unknown slugs, duplicate slugs,
+  out-of-range/non-numeric probabilities, and a shortlist shorter than 20 or
+  longer than 40 songs with a clear `ValueError`; an invalid `setlist` (bad set
+  label, unknown/duplicate slug, >40 songs) also raises, before anything is
+  written. The 20–40 shortlist bound is an MCP-submission rule only — it does
+  not touch `heuristic_prediction` or the publish pipeline.
 - Resubmitting for the same `{model_label}/{showdate}` never loses history:
   the prior file's content is folded into the new file's `versions` array
   (oldest first, at most 10 priors kept), so the scorecard can show the
@@ -152,6 +158,33 @@ Example JSON written (matches DEPLOY-CONTRACTS.md §5):
   }
 }
 ```
+
+### `scoreboard`
+
+```
+scoreboard(
+    model_label: str | None = None,   # your track, WITHOUT the "mcp:" prefix
+    recent: int = 5,                   # how many recent scored shows to summarize
+)
+```
+
+Your own track record plus the heuristic baseline, so you can **compare yourself
+against the heuristic before submitting** and calibrate. Reads the published
+scorecards tier (leakage-safe: scorecards only exist for already-played shows).
+Returns:
+
+- `models` — the `scoreboard.json` `models` mapping: per-model aggregate metrics
+  (`hit_rate_top20`, `recall`, `brier`, `log_loss`), the mean shortlist length
+  `avg_n_rows`, and for non-heuristic models `vs_heuristic` (paired mean deltas
+  vs the baseline over shows both scored).
+- `recent_shows` — for the most recent `recent` scored shows (showdate DESC), a
+  compact summary: `showdate`, `venue_name`, `n_played`, `missed_by_all`, and for
+  the `heuristic` plus (when `model_label` is given) your `mcp:{model_label}`
+  source, that source's `metrics`/`best_call`/`biggest_whiff`. Full row lists are
+  omitted to keep the payload small.
+
+A missing `scoreboard.json` / empty scorecards dir yields empty `models` /
+`recent_shows` (nothing scored yet), never an error.
 
 ## How submissions flow into publish
 
@@ -215,7 +248,7 @@ source key `mcp:<label>` and a row on the public scoreboard.
 
 Both benchmarks, every time:
 
-- `predictions` — the honest per-song probability shortlist (~25–40 songs,
+- `predictions` — the honest per-song probability shortlist (20–40 songs,
   probs in (0, 1]). Not renormalized up at publish, so a sparse list keeps
   its stated probabilities; the sum should be near the expected setlist
   size K (~19–20 songs in era 4).
@@ -238,6 +271,11 @@ prediction scoreboard. Use the connected `phishpred` MCP server to research
 and then submit your prediction for <SHOWDATE(S)>.
 
 Research first (read tools, any order):
+- scoreboard(model_label="<MODEL_LABEL>") — YOUR track record vs the
+  heuristic baseline (paired vs_heuristic deltas, recent best calls and
+  whiffs). Start here: know what you're beating and where you've been wrong.
+- show_length_stats() — songs-per-show averages. Your shortlist is scored
+  against ~18-19 distinct songs; your probs should sum near that.
 - upcoming_shows() — confirm the target show(s) and note the `epoch`.
 - run_context(showdate) — the multi-night run; already-played nights matter.
 - recent_setlists(10) — current tour context.
@@ -246,6 +284,11 @@ Research first (read tools, any order):
 - venue_history(...) and song_history(slug) for songs you want to check.
 - heuristic_prediction(showdate) — the statistical baseline. Beat it, don't
   copy it.
+- slot_propensities([...your draft setlist...]) — where each song actually
+  tends to sit (openers/closers/encore are scored; place them on data).
+- backtest_shortlist([...candidate slugs...]) — how your working hypothesis
+  would have scored over recent shows. Test before you submit; but remember
+  rotation: a song that hit 5 of the last 10 may be the one cooling down.
 
 Hard rules:
 - Phish essentially never repeats a song within a multi-night same-venue
@@ -260,7 +303,7 @@ submit_prediction(
   showdate="<SHOWDATE>",
   model_label="<MODEL_LABEL>",        # EXACTLY this string — it is your scoreboard identity
   predictions=[{"slug": ..., "prob": ...}, ...],
-      # 25-40 songs, prob in (0,1], your honest per-song probabilities;
+      # 20-40 songs, prob in (0,1], your honest per-song probabilities;
       # they are NOT renormalized up, and the sum should be near ~19-20.
   setlist={"sets": {"1": [...], "2": [...], "e": [...]}},
       # REQUIRED for the setlist benchmark: your full setlist call.

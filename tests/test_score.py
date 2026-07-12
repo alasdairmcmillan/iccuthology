@@ -66,8 +66,9 @@ def test_score_show_metric_math_hand_computed():
 
     m = sc["sources"]["heuristic"]["metrics"]
     assert sc["sources"]["heuristic"]["n_rows"] == 4
-    assert m["hits_top10"] == 2
-    assert m["hit_rate_top10"] == pytest.approx(0.5)          # 2 / min(10, 4)
+    assert m["top_n"] == 20                                   # published so consumers don't hardcode N
+    assert m["hits_top20"] == 2
+    assert m["hit_rate_top20"] == pytest.approx(0.5)          # 2 / min(20, 4)
     assert m["recall"] == pytest.approx(2 / 3)                # {tweezer,wilson} / 3 played
     # brier = mean[(0.9-1)^2, (0.6-0)^2, (0.4-1)^2, (0.2-0)^2] = 0.77/4
     assert m["brier"] == pytest.approx(0.1925)
@@ -100,7 +101,7 @@ def test_score_show_best_call_null_when_no_hits():
     src = sc["sources"]["heuristic"]
     assert src["best_call"] is None                 # no hits
     assert src["biggest_whiff"] == {"song": "Ghost", "slug": "ghost", "prob": 0.6}
-    assert src["metrics"]["hits_top10"] == 0
+    assert src["metrics"]["hits_top20"] == 0
     assert src["metrics"]["recall"] == pytest.approx(0.0)
 
 
@@ -114,7 +115,7 @@ def test_score_show_biggest_whiff_null_when_all_hit():
     src = sc["sources"]["heuristic"]
     assert src["biggest_whiff"] is None             # every row hit
     assert src["best_call"] == {"song": "Wilson", "slug": "wilson", "prob": 0.4}
-    assert src["metrics"]["hit_rate_top10"] == pytest.approx(1.0)
+    assert src["metrics"]["hit_rate_top20"] == pytest.approx(1.0)
 
 
 def test_score_show_multi_source_and_mcp_keeps_rationale():
@@ -141,7 +142,7 @@ def test_score_show_multi_source_and_mcp_keeps_rationale():
     assert mcp["rationale"] == "Fluffhead is due; opener energy points to Tweezer."
     assert mcp["submitted_at"] == "2026-07-04T13:00:00Z"
     # both mcp rows hit (tweezer, yem played)
-    assert mcp["metrics"]["hits_top10"] == 2
+    assert mcp["metrics"]["hits_top20"] == 2
     assert mcp["metrics"]["recall"] == pytest.approx(2 / 3)
     # statistical source does NOT carry rationale keys
     assert "rationale" not in sc["sources"]["heuristic"]
@@ -211,6 +212,8 @@ def test_score_show_setlist_score_hand_computed():
     assert ss["hit_rate"] == pytest.approx(0.8)  # 4 / 5
     assert ss["placed"] == 3                     # tweezer, wilson (set1), hood (e)
     assert ss["placed_rate"] == pytest.approx(0.75)  # 3 / 4 hits
+    # weighted_score = (hits + placed + exact_calls) / (3 * n_songs) = (4+3+2)/15
+    assert ss["weighted_score"] == pytest.approx(0.6)
 
     assert ss["marquee"]["opener"] is True       # tweezer opens both
     assert ss["marquee"]["encore"] is True       # hood in both encores
@@ -224,11 +227,98 @@ def test_score_show_setlist_score_hand_computed():
 
     ann1 = {r["slug"]: r for r in ss["sets"]["1"]}
     assert ann1["gin"]["hit"] is False and ann1["gin"]["placed"] is False   # unplayed
+    assert ann1["gin"]["exact"] is False
+    assert ann1["tweezer"]["exact"] is True      # tweezer opens both -> exact slot
+    assert ann1["wilson"]["placed"] is True and ann1["wilson"]["exact"] is False  # right set, wrong slot
     anne = {r["slug"]: r for r in ss["sets"]["e"]}
     assert anne["ghost"]["hit"] is True and anne["ghost"]["placed"] is False  # played, wrong set
+    assert anne["ghost"]["exact"] is False
+    assert anne["hood"]["exact"] is True         # encore pos0 hood==hood
+
+    # exact_calls is exactly the count of exact-annotated rows.
+    n_exact_rows = sum(1 for rows in ss["sets"].values() for r in rows if r["exact"])
+    assert n_exact_rows == ss["exact_calls"]
+    # nesting invariant: exact ⊆ placed ⊆ hit for every annotated row.
+    for rows in ss["sets"].values():
+        for r in rows:
+            if r["exact"]:
+                assert r["placed"] is True
+            if r["placed"]:
+                assert r["hit"] is True
 
     # played_sets echoed onto the scorecard for the UI
     assert sc["played_sets"]["1"][0]["slug"] == "tweezer"
+
+
+def test_score_show_setlist_weighted_all_exact_is_one():
+    # Every called song lands in its exact slot -> hit==placed==exact for all,
+    # so weighted_score = (n + n + n) / (3n) = 1.0 and every row flags exact.
+    pred = {"sets": {
+        "1": [{"slug": "tweezer", "song": "Tweezer"}, {"slug": "wilson", "song": "Wilson"}],
+        "e": [{"slug": "hood", "song": "Harry Hood"}],
+    }}
+    played_sets = {
+        "1": [{"slug": "tweezer", "song": "Tweezer"}, {"slug": "wilson", "song": "Wilson"}],
+        "e": [{"slug": "hood", "song": "Harry Hood"}],
+    }
+    played = [{"slug": "tweezer", "song": "Tweezer"}, {"slug": "wilson", "song": "Wilson"},
+              {"slug": "hood", "song": "Harry Hood"}]
+    src = {"model": "mcp:a", "kind": "mcp", "rationale": None, "submitted_at": None,
+           "rows": [{"song": "Tweezer", "slug": "tweezer", "prob": 0.7}], "setlist": pred}
+    ss = score_show(_frozen_payload({"mcp:a": src}), played, played_sets)["sources"]["mcp:a"]["setlist_score"]
+
+    assert ss["hits"] == 3 and ss["placed"] == 3 and ss["exact_calls"] == 3
+    assert ss["weighted_score"] == pytest.approx(1.0)
+    assert all(r["exact"] for rows in ss["sets"].values() for r in rows)
+
+
+def test_score_show_setlist_weighted_no_hit_is_zero():
+    # No called song plays at all -> hits==placed==exact==0 -> weighted_score 0.0.
+    pred = {"sets": {"1": [{"slug": "gin", "song": "Bathtub Gin"},
+                           {"slug": "reba", "song": "Reba"}]}}
+    played_sets = {"1": [{"slug": "tweezer", "song": "Tweezer"}]}
+    played = [{"slug": "tweezer", "song": "Tweezer"}]
+    src = {"model": "mcp:a", "kind": "mcp", "rationale": None, "submitted_at": None,
+           "rows": [{"song": "Bathtub Gin", "slug": "gin", "prob": 0.4}], "setlist": pred}
+    ss = score_show(_frozen_payload({"mcp:a": src}), played, played_sets)["sources"]["mcp:a"]["setlist_score"]
+
+    assert ss["hits"] == 0 and ss["placed"] == 0 and ss["exact_calls"] == 0
+    assert ss["weighted_score"] == pytest.approx(0.0)
+    assert not any(r["exact"] for rows in ss["sets"].values() for r in rows)
+
+
+def test_score_show_setlist_exact_calls_matches_old_loop_semantics():
+    # exact_calls counts (set, position) matches over shared keys up to the min
+    # length. Exercise: a called set absent on the played side ("3"), a played
+    # set absent on the called side (handled by iterating pred sets), and length
+    # mismatches (called longer than played and vice versa).
+    pred = {"sets": {
+        "1": [{"slug": "a", "song": "A"}, {"slug": "b", "song": "B"}, {"slug": "c", "song": "C"}],  # played "1" shorter
+        "2": [{"slug": "x", "song": "X"}],                                                          # played "2" longer
+        "3": [{"slug": "z", "song": "Z"}],                                                          # no played "3"
+    }}
+    played_sets = {
+        "1": [{"slug": "a", "song": "A"}, {"slug": "q", "song": "Q"}],   # pos0 a==a exact, pos1 b!=q
+        "2": [{"slug": "x", "song": "X"}, {"slug": "y", "song": "Y"}],   # pos0 x==x exact
+    }
+    played = [{"slug": "a", "song": "A"}, {"slug": "q", "song": "Q"},
+              {"slug": "x", "song": "X"}, {"slug": "y", "song": "Y"}]
+    src = {"model": "mcp:a", "kind": "mcp", "rationale": None, "submitted_at": None,
+           "rows": [{"song": "A", "slug": "a", "prob": 0.5}], "setlist": pred}
+
+    played_by_set = {k: [s["slug"] for s in v] for k, v in played_sets.items()}
+    # Reference: the pre-refactor exact_calls loop, verbatim.
+    old = 0
+    for key, songs in pred["sets"].items():
+        actual = played_by_set.get(key)
+        if not actual:
+            continue
+        for i in range(min(len(songs), len(actual))):
+            if songs[i].get("slug") == actual[i]:
+                old += 1
+
+    ss = score_show(_frozen_payload({"mcp:a": src}), played, played_sets)["sources"]["mcp:a"]["setlist_score"]
+    assert ss["exact_calls"] == old == 2   # a (set1 pos0) + x (set2 pos0); "3" sits out
 
 
 def test_score_show_setlist_score_null_without_setlist():
@@ -269,9 +359,9 @@ def test_score_show_version_scoring_and_after_showdate():
     vs = entry["versions"]
     assert len(vs) == 2                                 # oldest first
     assert vs[0]["after_showdate"] is None              # pre-run
-    assert vs[0]["metrics"]["hits_top10"] == 0          # ghost not played
+    assert vs[0]["metrics"]["hits_top20"] == 0          # ghost not played
     assert vs[1]["after_showdate"] == "2026-07-03"      # latest played in window
-    assert vs[1]["metrics"]["hits_top10"] == 1          # tweezer played
+    assert vs[1]["metrics"]["hits_top20"] == 1          # tweezer played
     assert vs[1]["rows"][0]["hit"] is True              # rows carry hit flags
 
 
@@ -299,17 +389,17 @@ def test_build_scoreboard_means_and_desc_order():
     sc_a = {
         "showdate": "2026-07-05", "venue_name": "V1", "city": "C1", "state": "S1", "n_played": 20,
         "sources": {
-            "heuristic": {"kind": "statistical", "metrics": {
-                "hit_rate_top10": 0.6, "recall": 0.4, "brier": 0.10, "log_loss": 0.30}},
+            "heuristic": {"kind": "statistical", "n_rows": 40, "metrics": {
+                "hit_rate_top20": 0.6, "recall": 0.4, "brier": 0.10, "log_loss": 0.30}},
         },
     }
     sc_b = {
         "showdate": "2026-07-08", "venue_name": "V2", "city": "C2", "state": "S2", "n_played": 22,
         "sources": {
-            "heuristic": {"kind": "statistical", "metrics": {
-                "hit_rate_top10": 0.4, "recall": 0.6, "brier": 0.20, "log_loss": 0.50}},
-            "mcp:agent": {"kind": "mcp", "metrics": {
-                "hit_rate_top10": 0.8, "recall": 0.5, "brier": 0.05, "log_loss": 0.10}},
+            "heuristic": {"kind": "statistical", "n_rows": 30, "metrics": {
+                "hit_rate_top20": 0.4, "recall": 0.6, "brier": 0.20, "log_loss": 0.50}},
+            "mcp:agent": {"kind": "mcp", "n_rows": 24, "metrics": {
+                "hit_rate_top20": 0.8, "recall": 0.5, "brier": 0.05, "log_loss": 0.10}},
         },
     }
     board = build_scoreboard([sc_a, sc_b])
@@ -321,13 +411,22 @@ def test_build_scoreboard_means_and_desc_order():
     # heuristic appears in both -> unweighted means
     h = board["models"]["heuristic"]
     assert h["n_shows"] == 2
-    assert h["hit_rate_top10"] == pytest.approx(0.5)
+    assert h["hit_rate_top20"] == pytest.approx(0.5)
     assert h["recall"] == pytest.approx(0.5)
     assert h["brier"] == pytest.approx(0.15)
     assert h["log_loss"] == pytest.approx(0.40)
+    assert h["avg_n_rows"] == pytest.approx(35.0)  # mean(40, 30)
+    assert "vs_heuristic" not in h                  # omitted for the heuristic itself
     # mcp appears in one show only
-    assert board["models"]["mcp:agent"]["n_shows"] == 1
-    assert board["models"]["mcp:agent"]["kind"] == "mcp"
+    agent = board["models"]["mcp:agent"]
+    assert agent["n_shows"] == 1
+    assert agent["kind"] == "mcp"
+    assert agent["avg_n_rows"] == pytest.approx(24.0)
+    # vs_heuristic: paired over the ONE show where both appear (sc_b)
+    vh = agent["vs_heuristic"]
+    assert vh["n_shows"] == 1
+    assert vh["hit_rate_top20_delta"] == pytest.approx(0.8 - 0.4)
+    assert vh["recall_delta"] == pytest.approx(0.5 - 0.6)
 
 
 def test_build_scoreboard_empty():
@@ -343,11 +442,11 @@ def test_build_scoreboard_setlist_and_refresh_gain_aggregates():
         "sources": {
             "mcp:a": {
                 "kind": "mcp",
-                "metrics": {"hit_rate_top10": 0.6, "recall": 0.5, "brier": 0.1, "log_loss": 0.3},
-                "setlist_score": {"hit_rate": 0.5, "placed_rate": 0.6,
+                "metrics": {"hit_rate_top20": 0.6, "recall": 0.5, "brier": 0.1, "log_loss": 0.3},
+                "setlist_score": {"hit_rate": 0.5, "placed_rate": 0.6, "weighted_score": 0.5,
                                   "marquee_calls": 2, "exact_calls": 1, "sharpshooter": False},
                 "versions": [  # first take -> refresh_gain compares against it
-                    {"metrics": {"hit_rate_top10": 0.4, "recall": 0.3, "brier": 0.2, "log_loss": 0.5}},
+                    {"metrics": {"hit_rate_top20": 0.4, "recall": 0.3, "brier": 0.2, "log_loss": 0.5}},
                 ],
             },
         },
@@ -357,8 +456,8 @@ def test_build_scoreboard_setlist_and_refresh_gain_aggregates():
         "sources": {
             "mcp:a": {
                 "kind": "mcp",
-                "metrics": {"hit_rate_top10": 0.8, "recall": 0.7, "brier": 0.05, "log_loss": 0.1},
-                "setlist_score": {"hit_rate": 0.7, "placed_rate": 0.8,
+                "metrics": {"hit_rate_top20": 0.8, "recall": 0.7, "brier": 0.05, "log_loss": 0.1},
+                "setlist_score": {"hit_rate": 0.7, "placed_rate": 0.8, "weighted_score": 0.7,
                                   "marquee_calls": 3, "exact_calls": 2, "sharpshooter": True},
                 # no versions here -> excluded from refresh_gain
             },
@@ -371,6 +470,7 @@ def test_build_scoreboard_setlist_and_refresh_gain_aggregates():
     assert sl["n_shows"] == 2
     assert sl["hit_rate"] == pytest.approx(0.6)      # mean(0.5, 0.7)
     assert sl["placed_rate"] == pytest.approx(0.7)   # mean(0.6, 0.8)
+    assert sl["weighted_score"] == pytest.approx(0.6)  # mean(0.5, 0.7)
     assert sl["marquee_calls"] == 5                  # 2 + 3
     assert sl["exact_calls"] == 3                    # 1 + 2
     assert sl["sharpshooters"] == 1                  # only sc_b
@@ -378,7 +478,7 @@ def test_build_scoreboard_setlist_and_refresh_gain_aggregates():
     # refresh_gain over the ONE show with a prior version (final - first take)
     rg = m["refresh_gain"]
     assert rg["n_shows"] == 1
-    assert rg["mean_hit_rate_top10_delta"] == pytest.approx(0.6 - 0.4)
+    assert rg["mean_hit_rate_top20_delta"] == pytest.approx(0.6 - 0.4)
     assert rg["mean_recall_delta"] == pytest.approx(0.5 - 0.3)
 
 
@@ -388,7 +488,7 @@ def test_build_scoreboard_omits_setlist_and_refresh_gain_when_absent():
         "sources": {
             "heuristic": {
                 "kind": "statistical",
-                "metrics": {"hit_rate_top10": 0.5, "recall": 0.4, "brier": 0.1, "log_loss": 0.3},
+                "metrics": {"hit_rate_top20": 0.5, "recall": 0.4, "brier": 0.1, "log_loss": 0.3},
                 "setlist_score": None,   # sits out the setlist benchmark
             },
         },
@@ -396,6 +496,22 @@ def test_build_scoreboard_omits_setlist_and_refresh_gain_when_absent():
     m = build_scoreboard([sc])["models"]["heuristic"]
     assert "setlist" not in m        # no setlist-scored shows
     assert "refresh_gain" not in m   # no multi-take shows
+
+
+def test_build_scoreboard_vs_heuristic_omitted_when_no_paired_shows():
+    # mcp:agent is scored on a show where the heuristic is absent -> no pairing.
+    sc = {
+        "showdate": "2026-07-05", "venue_name": "V", "city": "C", "state": "S", "n_played": 20,
+        "sources": {
+            "mcp:agent": {
+                "kind": "mcp", "n_rows": 25,
+                "metrics": {"hit_rate_top20": 0.5, "recall": 0.4, "brier": 0.1, "log_loss": 0.3},
+            },
+        },
+    }
+    m = build_scoreboard([sc])["models"]["mcp:agent"]
+    assert "vs_heuristic" not in m   # heuristic never co-scored -> zero paired shows
+    assert m["avg_n_rows"] == pytest.approx(25.0)
 
 
 # ---------------------------------------------------------------------------
@@ -517,6 +633,29 @@ def test_score_all_rescore_window_rewrite_vs_old_skip(conn, tmp_path):
     # scoreboard reflects BOTH scorecards present on disk (desc order)
     board = json.loads((out / "scoreboard.json").read_text(encoding="utf-8"))
     assert [s["showdate"] for s in board["shows"]] == ["2026-07-05", "2026-06-01"]
+
+
+def test_score_all_force_rescores_old_cards_outside_window(conn, tmp_path):
+    frozen = tmp_path / "frozen"
+    out = tmp_path / "scorecards"
+    out.mkdir(parents=True, exist_ok=True)
+    _write_frozen(frozen, "2026-06-01")   # old played show, well outside the window
+
+    # Pre-existing scorecard with a sentinel marker (a stale, pre-cutover card).
+    (out / "2026-06-01.json").write_text(
+        json.dumps({"showdate": "2026-06-01", "marker": True, "sources": {}}), encoding="utf-8"
+    )
+
+    # Without force the old card is skipped; with force it is rewritten so a
+    # metric-definition change propagates to every card.
+    assert score_all(conn, frozen, out, today=date(2026, 7, 10)) == []
+    assert json.loads((out / "2026-06-01.json").read_text(encoding="utf-8")).get("marker") is True
+
+    written = score_all(conn, frozen, out, today=date(2026, 7, 10), force=True)
+    assert written == ["2026-06-01"]
+    recent = json.loads((out / "2026-06-01.json").read_text(encoding="utf-8"))
+    assert "marker" not in recent                       # rewritten as a real scorecard
+    assert recent["sources"]["heuristic"]["metrics"]["top_n"] == 20
 
 
 def test_score_all_empty_frozen_dir_writes_empty_scoreboard(conn, tmp_path):

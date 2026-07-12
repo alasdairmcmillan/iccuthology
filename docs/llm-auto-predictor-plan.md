@@ -15,6 +15,27 @@ current run (the "virtual Monty Hall" refresh), producing a new submission
 VERSION per show so the scorecard shows the improvement arc. Zero human steps
 during tour.
 
+Wiring audit (2026-07-12, scorecard-ui-updates branch): all foundations this
+plan depends on are in place — `models/llm.py` adapters (anthropic/openai/
+gemini/openai-compat, structured JSON, disk cache, `context_fn` hook),
+`predict_show` accepts `llm:*` specs, `publish` folds `llm:*` compare columns
+with `LLMError` tolerance, `submit_prediction` validates + versions, and
+`ANTHROPIC_API_KEY` reaches the publish step in `publish.yml`. Two tripwires
+for the implementing branch:
+1. **Shortlist bounds (NEW)**: `submit_prediction` now enforces 20–40
+   predictions per submission. `PREDICTIONS_SCHEMA` has no `minItems` and
+   `SYSTEM_PROMPT` doesn't state a count — the llm-submit prompt/schema must
+   request 20–40 rows or every submission will be rejected. (Another reason
+   for the `max_tokens` bump below.)
+2. **Gemini key naming**: standardized on `GOOGLE_API_KEY` end-to-end —
+   it's what `GeminiClient` reads, what `.env.example` documents, and the
+   repo secret exists under that name (verified 2026-07-12). The workflow
+   snippet below still says `GEMINI_API_KEY`; use `GOOGLE_API_KEY` when
+   writing the real step.
+Also newly available: `phishpred.mcp.tools.scoreboard(...)` returns each
+label's past accuracy plus the heuristic baseline (paired `vs_heuristic`
+deltas) — worth folding into the llm-submit prompt as calibration context.
+
 Key insight from the 2026-07-11 session: the pipeline is already reactive —
 `submitted_manifest_hash` is in the epoch key, so any new/updated submission
 file triggers republish → refold → refreeze. The ONLY missing piece is the

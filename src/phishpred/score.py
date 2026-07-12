@@ -32,7 +32,7 @@ from .modes import _round_floats
 
 # Metrics look at the first N rows for the "top-N" family (§8). Rows in a frozen
 # source are already prob-descending; we preserve that order.
-_TOP_N = 10
+_TOP_N = 20
 # log_loss probability clamp so an all-in 0/1 prediction can't blow up to inf.
 _LOG_LOSS_CLAMP = (0.001, 0.999)
 # A prior take's `after_showdate` only reaches back this many days — runs never
@@ -63,8 +63,8 @@ def _metrics(scored_rows: list[dict[str, Any]], played_slugs: set[str]) -> dict[
     """The §8 metrics bucket over one shortlist's hit-annotated rows."""
     n_rows = len(scored_rows)
     top_n = min(_TOP_N, n_rows)
-    hits_top10 = sum(1 for r in scored_rows[:top_n] if r["hit"])
-    hit_rate_top10 = hits_top10 / top_n if top_n else 0.0
+    hits_top20 = sum(1 for r in scored_rows[:top_n] if r["hit"])
+    hit_rate_top20 = hits_top20 / top_n if top_n else 0.0
 
     shortlist = {r["slug"] for r in scored_rows}
     n_played = len(played_slugs)
@@ -84,8 +84,9 @@ def _metrics(scored_rows: list[dict[str, Any]], played_slugs: set[str]) -> dict[
         log_loss = 0.0
 
     return {
-        "hits_top10": hits_top10,
-        "hit_rate_top10": hit_rate_top10,
+        "top_n": _TOP_N,
+        "hits_top20": hits_top20,
+        "hit_rate_top20": hit_rate_top20,
         "recall": recall,
         "brier": brier,
         "log_loss": log_loss,
@@ -108,29 +109,49 @@ def _score_setlist(setlist: dict[str, Any], played_slugs: set[str],
 
     ``setlist`` is the folded ``{"sets": {"1": [{"slug","song"},...], ...}}``.
     ``played_by_set`` maps each raw set label to its distinct played slug list
-    (position order). Returns the ``setlist_score`` shape: per-song hit/placed
-    annotations, hit/placed rates, marquee flags, exact_calls, sharpshooter.
+    (position order). Returns the ``setlist_score`` shape: per-song
+    hit/placed/exact annotations, hit/placed rates, marquee flags, exact_calls,
+    sharpshooter, and a ``weighted_score``.
+
+    ``weighted_score`` tiers the three annotations by specificity: each called
+    song earns 1 point if it played anywhere in the show (``hit``), +1 more if in
+    the PREDICTED set (``placed``), +1 more if in the exact slot (``exact``) —
+    ``(hits + placed + exact_calls) / (3 * n_songs)`` (0.0 when ``n_songs`` is 0).
+    ``exact`` ⊆ ``placed`` ⊆ ``hit`` by construction, so a perfect call
+    (every song in its exact slot) scores 1.0.
     """
     pred_sets = setlist.get("sets") or {}
     annotated: dict[str, list[dict[str, Any]]] = {}
-    n_songs = hits = placed = 0
+    n_songs = hits = placed = exact_calls = 0
     for key, songs in pred_sets.items():
         in_set = set(played_by_set.get(key, []))
+        # actual (position order) for the exact (set, position) comparison — only
+        # over shared indices up to the min length, and only when present here.
+        actual = played_by_set.get(key)
         rows: list[dict[str, Any]] = []
-        for s in songs:
+        for i, s in enumerate(songs):
             slug = s.get("slug")
             hit = slug in played_slugs           # played anywhere in the show
             placed_here = slug in in_set          # played in the PREDICTED set
-            rows.append({"slug": slug, "song": s.get("song"), "hit": hit, "placed": placed_here})
+            # exact: predicted sets[key][i] == played_sets[key][i] (same (set,
+            # position)); exact ⊆ placed ⊆ hit by construction.
+            exact_here = bool(actual) and i < len(actual) and slug == actual[i]
+            rows.append({
+                "slug": slug, "song": s.get("song"),
+                "hit": hit, "placed": placed_here, "exact": exact_here,
+            })
             n_songs += 1
             hits += 1 if hit else 0
             placed += 1 if placed_here else 0
+            exact_calls += 1 if exact_here else 0
         annotated[key] = rows
 
     hit_rate = hits / n_songs if n_songs else 0.0
     # placed_rate denominator is HITS (of the songs that played, how many landed
     # in the predicted set); 0/0 -> 0.
     placed_rate = placed / hits if hits else 0.0
+    # weighted_score tiers hit/placed/exact by specificity (see docstring).
+    weighted_score = (hits + placed + exact_calls) / (3 * n_songs) if n_songs else 0.0
 
     marquee = {
         "opener": _pos_match(pred_sets, played_by_set, "1", 0),
@@ -144,16 +165,9 @@ def _score_setlist(setlist: dict[str, Any], played_slugs: set[str],
     }
     marquee_calls = sum(1 for v in marquee.values() if v)
 
-    # exact_calls: (set, position) pairs where predicted slug == actual slug, over
-    # shared keys up to the min length. Subsumes opener/closer positions.
-    exact_calls = 0
-    for key, songs in pred_sets.items():
-        actual = played_by_set.get(key)
-        if not actual:
-            continue
-        for i in range(min(len(songs), len(actual))):
-            if songs[i].get("slug") == actual[i]:
-                exact_calls += 1
+    # exact_calls is now the count of exact-annotated rows above — (set, position)
+    # pairs where predicted slug == actual slug over shared keys up to the min
+    # length. Subsumes opener/closer positions.
 
     return {
         "n_songs": n_songs,
@@ -162,6 +176,7 @@ def _score_setlist(setlist: dict[str, Any], played_slugs: set[str],
         "hit_rate": hit_rate,
         "placed": placed,
         "placed_rate": placed_rate,
+        "weighted_score": weighted_score,
         "marquee": marquee,
         "marquee_calls": marquee_calls,
         "exact_calls": exact_calls,
@@ -339,26 +354,31 @@ def build_scoreboard(scorecards: list[dict[str, Any]]) -> dict[str, Any]:
     shows = []
     # model_key -> {"kind": str, metric lists..., setlist lists..., refresh deltas...}
     agg: dict[str, dict[str, Any]] = {}
+    # showdate -> {source_key -> metrics dict}, for the paired vs_heuristic delta.
+    per_show_metrics: dict[str, dict[str, dict[str, Any]]] = {}
 
     def _bucket(key: str, kind: Any) -> dict[str, Any]:
         return agg.setdefault(
             key,
             {
                 "kind": kind,
-                "hit_rate_top10": [], "recall": [], "brier": [], "log_loss": [],
+                "hit_rate_top20": [], "recall": [], "brier": [], "log_loss": [],
+                # unweighted mean of the source's shortlist length across its shows.
+                "n_rows": [],
                 # setlist aggregate (only over shows where setlist_score is non-null)
-                "sl_hit_rate": [], "sl_placed_rate": [],
+                "sl_hit_rate": [], "sl_placed_rate": [], "sl_weighted_score": [],
                 "sl_marquee_calls": 0, "sl_exact_calls": 0, "sl_sharpshooters": 0,
                 # refresh_gain (only over shows with >= 1 prior version)
-                "hit_rate_top10_delta": [], "recall_delta": [],
+                "hit_rate_top20_delta": [], "recall_delta": [],
             },
         )
 
     for sc in scorecards:
         source_keys = list((sc.get("sources") or {}).keys())
+        showdate = sc.get("showdate")
         shows.append(
             {
-                "showdate": sc.get("showdate"),
+                "showdate": showdate,
                 "venue_name": sc.get("venue_name"),
                 "city": sc.get("city"),
                 "state": sc.get("state"),
@@ -366,18 +386,23 @@ def build_scoreboard(scorecards: list[dict[str, Any]]) -> dict[str, Any]:
                 "source_keys": source_keys,
             }
         )
+        show_bucket = per_show_metrics.setdefault(showdate, {})
         for key, src in (sc.get("sources") or {}).items():
             metrics = src.get("metrics") or {}
+            show_bucket[key] = metrics
             bucket = _bucket(key, src.get("kind"))
-            for m in ("hit_rate_top10", "recall", "brier", "log_loss"):
+            for m in ("hit_rate_top20", "recall", "brier", "log_loss"):
                 if m in metrics:
                     bucket[m].append(metrics[m])
+            if src.get("n_rows") is not None:
+                bucket["n_rows"].append(src["n_rows"])
 
             # Setlist aggregate: only shows where this source carried a setlist.
             sl = src.get("setlist_score")
             if sl:
                 bucket["sl_hit_rate"].append(sl.get("hit_rate", 0.0))
                 bucket["sl_placed_rate"].append(sl.get("placed_rate", 0.0))
+                bucket["sl_weighted_score"].append(sl.get("weighted_score", 0.0))
                 bucket["sl_marquee_calls"] += sl.get("marquee_calls", 0)
                 bucket["sl_exact_calls"] += sl.get("exact_calls", 0)
                 bucket["sl_sharpshooters"] += 1 if sl.get("sharpshooter") else 0
@@ -386,7 +411,7 @@ def build_scoreboard(scorecards: list[dict[str, Any]]) -> dict[str, Any]:
             versions = src.get("versions") or []
             if versions:
                 first = versions[0].get("metrics") or {}
-                for out_key, m in (("hit_rate_top10_delta", "hit_rate_top10"), ("recall_delta", "recall")):
+                for out_key, m in (("hit_rate_top20_delta", "hit_rate_top20"), ("recall_delta", "recall")):
                     if m in metrics and m in first:
                         bucket[out_key].append(metrics[m] - first[m])
 
@@ -399,11 +424,14 @@ def build_scoreboard(scorecards: list[dict[str, Any]]) -> dict[str, Any]:
     for key, b in agg.items():
         entry: dict[str, Any] = {
             "kind": b["kind"],
-            "n_shows": len(b["hit_rate_top10"]),
-            "hit_rate_top10": _mean(b["hit_rate_top10"]),
+            "n_shows": len(b["hit_rate_top20"]),
+            "hit_rate_top20": _mean(b["hit_rate_top20"]),
             "recall": _mean(b["recall"]),
             "brier": _mean(b["brier"]),
             "log_loss": _mean(b["log_loss"]),
+            # shortlist lengths vary 20-40 across mcp sources; publish the mean so
+            # the UI can show it next to recall.
+            "avg_n_rows": _mean(b["n_rows"]),
         }
         # setlist aggregate (rates unweighted means; calls/sharpshooters totals).
         # Omit the key when no setlist-scored shows.
@@ -413,18 +441,42 @@ def build_scoreboard(scorecards: list[dict[str, Any]]) -> dict[str, Any]:
                 "n_shows": n_sl,
                 "hit_rate": _mean(b["sl_hit_rate"]),
                 "placed_rate": _mean(b["sl_placed_rate"]),
+                "weighted_score": _mean(b["sl_weighted_score"]),
                 "marquee_calls": b["sl_marquee_calls"],
                 "exact_calls": b["sl_exact_calls"],
                 "sharpshooters": b["sl_sharpshooters"],
             }
         # refresh_gain: omit when no multi-take shows.
-        n_rg = len(b["hit_rate_top10_delta"])
+        n_rg = len(b["hit_rate_top20_delta"])
         if n_rg:
             entry["refresh_gain"] = {
                 "n_shows": n_rg,
-                "mean_hit_rate_top10_delta": _mean(b["hit_rate_top10_delta"]),
+                "mean_hit_rate_top20_delta": _mean(b["hit_rate_top20_delta"]),
                 "mean_recall_delta": _mean(b["recall_delta"]),
             }
+        # vs_heuristic: paired mean deltas over shows where BOTH this source and
+        # the heuristic have metrics. Omit for the heuristic itself and when no
+        # shows are paired (§8 — calibration against the baseline).
+        if key != "heuristic":
+            n_paired = 0
+            hr_deltas: list[float] = []
+            recall_deltas: list[float] = []
+            for sb in per_show_metrics.values():
+                mine = sb.get(key)
+                base = sb.get("heuristic")
+                if mine is None or base is None:
+                    continue
+                n_paired += 1
+                if "hit_rate_top20" in mine and "hit_rate_top20" in base:
+                    hr_deltas.append(mine["hit_rate_top20"] - base["hit_rate_top20"])
+                if "recall" in mine and "recall" in base:
+                    recall_deltas.append(mine["recall"] - base["recall"])
+            if n_paired:
+                entry["vs_heuristic"] = {
+                    "n_shows": n_paired,
+                    "hit_rate_top20_delta": _mean(hr_deltas),
+                    "recall_delta": _mean(recall_deltas),
+                }
         models[key] = entry
 
     return {"updated_at": utc_now_iso(), "shows": shows, "models": models}
@@ -501,6 +553,7 @@ def score_all(
     out_dir: str | Path,
     rescore_days: int = 7,
     today: date | None = None,
+    force: bool = False,
 ) -> list[str]:
     """Scan frozen show docs, score the played ones, rebuild the scoreboard (§8).
 
@@ -510,6 +563,11 @@ def score_all(
     exists it is SKIPPED, UNLESS ``showdate >= UTC today - rescore_days`` — inside
     that window scoring is an idempotent rewrite so late setlist corrections and
     partially-ingested west-coast shows self-heal on the next run.
+
+    ``force=True`` rescores EVERY eligible frozen show regardless of an existing
+    scorecard (the rescore window is bypassed). Use it when the metric definitions
+    change (e.g. a top-N cutover) so old cards pick up the new shapes rather than
+    being frozen at their last-scored definition.
 
     Afterwards ALWAYS rebuilds ``{out_dir}/scoreboard.json`` from every scorecard
     present (an empty scoreboard is valid). ``out_dir`` is created if needed.
@@ -546,8 +604,9 @@ def score_all(
         played, played_sets = result
 
         dest = out_path / f"{showdate}.json"
-        # Skip an already-written scorecard unless it's inside the rescore window.
-        if dest.exists() and showdate_date < rescore_cutoff:
+        # Skip an already-written scorecard unless it's inside the rescore window
+        # (or force= bypasses the skip entirely for a metric-definition rescore).
+        if not force and dest.exists() and showdate_date < rescore_cutoff:
             continue
 
         scorecard = score_show(payload, played, played_sets, played_showdates)

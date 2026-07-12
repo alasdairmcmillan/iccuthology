@@ -340,17 +340,19 @@ def score(
     frozen: str = typer.Option(..., "--frozen", help="Frozen show-doc dir (frozen/show — one {showdate}.json per show)"),
     out: str = typer.Option(..., "--out", help="Scorecards output dir (writes {showdate}.json + scoreboard.json)"),
     rescore_days: int = typer.Option(7, "--rescore-days", help="Rewrite scorecards for shows within this many days of UTC today"),
+    force: bool = typer.Option(False, "--force", help="Rescore EVERY eligible frozen show, ignoring the rescore window — for metric-definition changes (e.g. a top-N cutover) that must propagate to old scorecards"),
 ) -> None:
     """Score frozen past predictions against actual setlists (deploy plan §8).
 
     Scans each frozen show doc whose show is played + indexed in the DB, writes a
     per-show scorecard (skipping already-scored shows outside the rescore window),
-    then always rebuilds scoreboard.json.
+    then always rebuilds scoreboard.json. ``--force`` bypasses the skip so a metric
+    redefinition reaches every old card in one pass.
     """
     from .db import get_connection
     from .score import score_all
 
-    written = score_all(get_connection(), frozen, out, rescore_days=rescore_days)
+    written = score_all(get_connection(), frozen, out, rescore_days=rescore_days, force=force)
     typer.echo(f"scored {len(written)} show(s) -> {out}; scoreboard.json rebuilt")
 
 

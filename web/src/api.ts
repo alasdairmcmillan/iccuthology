@@ -92,8 +92,68 @@ export function fetchSetlist(showdate: string): Promise<SetlistPrediction | null
 // Accuracy scorecards (DEPLOY-CONTRACTS §8) — past-prediction scoring, NOT
 // epoch-scoped. Same getJson(path, fixture) pattern as the epoch artifacts so
 // past mode is fully developable offline.
+
+// ---------------------------------------------------------------------------
+// Legacy-name tolerance. Deployed R2 may still hold scorecards/scoreboard
+// written under the pre-"top20" field names until a forced rescore runs. Map
+// the old names onto the current ones in place (a no-op once the artifact
+// already uses the new shape) and default top_n to the legacy window of 10, so
+// old artifacts render correctly — the dynamic top_n then labels them "top 10".
+// Kept intentionally tiny; delete once R2 is guaranteed rescored.
+// ---------------------------------------------------------------------------
+type Loose = Record<string, unknown>;
+function normalizeMetrics(m: Loose | undefined): void {
+  if (!m) return;
+  if (m.top_n === undefined) m.top_n = 10;
+  if (m.hits_top20 === undefined && m.hits_top10 !== undefined) m.hits_top20 = m.hits_top10;
+  if (m.hit_rate_top20 === undefined && m.hit_rate_top10 !== undefined)
+    m.hit_rate_top20 = m.hit_rate_top10;
+}
+// A pre-weighted-benchmark setlist_score is missing per-song `exact` flags and
+// the `weighted_score` field. Default each row's `exact` to false, then rebuild
+// `weighted_score` from the still-present counts — the reconstruction is EXACT
+// (all three counts ship in the legacy shape), no-op once the field is present.
+function normalizeSetlistScore(ss: Loose | null | undefined): void {
+  if (!ss) return;
+  const sets = ss.sets as Record<string, Loose[]> | undefined;
+  if (sets) {
+    for (const rows of Object.values(sets)) {
+      for (const r of rows) if (r.exact === undefined) r.exact = false;
+    }
+  }
+  if (ss.weighted_score === undefined) {
+    const n = (ss.n_songs as number) ?? 0;
+    const hits = (ss.hits as number) ?? 0;
+    const placed = (ss.placed as number) ?? 0;
+    const exact = (ss.exact_calls as number) ?? 0;
+    ss.weighted_score = n ? (hits + placed + exact) / (3 * n) : 0;
+  }
+}
+function normalizeScorecard(sc: Scorecard): Scorecard {
+  for (const src of Object.values(sc.sources) as unknown as Loose[]) {
+    normalizeMetrics(src.metrics as Loose);
+    normalizeSetlistScore(src.setlist_score as Loose | null);
+    for (const v of (src.versions as Loose[] | undefined) ?? []) {
+      normalizeMetrics(v.metrics as Loose);
+      normalizeSetlistScore(v.setlist_score as Loose | null);
+    }
+  }
+  return sc;
+}
+function normalizeScoreboard(sb: Scoreboard): Scoreboard {
+  for (const m of Object.values(sb.models) as unknown as Loose[]) {
+    if (m.hit_rate_top20 === undefined && m.hit_rate_top10 !== undefined)
+      m.hit_rate_top20 = m.hit_rate_top10;
+    if (m.avg_n_rows === undefined) m.avg_n_rows = 0;
+    const rg = m.refresh_gain as Loose | undefined;
+    if (rg && rg.mean_hit_rate_top20_delta === undefined && rg.mean_hit_rate_top10_delta !== undefined)
+      rg.mean_hit_rate_top20_delta = rg.mean_hit_rate_top10_delta;
+  }
+  return sb;
+}
+
 export function fetchScoreboard(): Promise<Scoreboard> {
-  return getJson("/api/scoreboard", () => genScoreboard);
+  return getJson("/api/scoreboard", () => genScoreboard).then(normalizeScoreboard);
 }
 
 export function fetchScorecard(showdate: string): Promise<Scorecard> {
@@ -101,7 +161,7 @@ export function fetchScorecard(showdate: string): Promise<Scorecard> {
     const s = genScorecards[showdate];
     if (!s) throw new Error(`no fixture scorecard for ${showdate}`);
     return s;
-  });
+  }).then(normalizeScorecard);
 }
 
 // ---------------------------------------------------------------------------

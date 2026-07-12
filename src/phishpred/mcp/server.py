@@ -23,7 +23,8 @@ Or run it directly from the repo root:
 
 Tools (deploy plan §5a):
   read:  upcoming_shows, candidate_features, song_history, venue_history,
-         recent_setlists, run_context, heuristic_prediction
+         recent_setlists, run_context, heuristic_prediction, show_length_stats,
+         slot_propensities, backtest_shortlist, scoreboard
   write: submit_prediction  (writes to data/predictions/submitted/, never to
          core tables -- see deploy plan §9: treat submissions as untrusted)
 
@@ -42,6 +43,7 @@ from ..db import get_connection
 from . import tools
 
 DEFAULT_SUBMIT_DIR = DATA_DIR / "predictions" / "submitted"
+DEFAULT_SCORECARDS_DIR = DATA_DIR / "scorecards"
 
 mcp = FastMCP("phishpred")
 
@@ -109,6 +111,61 @@ def heuristic_prediction(showdate: str, half_life: int = 50, top: int = 30) -> d
 
 
 @mcp.tool()
+def slot_propensities(slugs: list[str]) -> dict[str, Any]:
+    """Set-position tendencies for a batch of songs, plus the current era's
+    set-structure stats (sets per show, songs per set).
+
+    Use this BEFORE placing your setlist call: openers/closers/encore are
+    scored as marquee calls and exact slots earn the weighted score, so check
+    where each song actually tends to sit (e.g. is it a set2-open song or an
+    encore song?). Pass your whole draft setlist in one call. Unknown slugs
+    come back under ``unknown_slugs`` instead of raising.
+    """
+    return tools.slot_propensities(_get_conn(), slugs)
+
+
+@mcp.tool()
+def backtest_shortlist(slugs: list[str], n_shows: int = 20) -> dict[str, Any]:
+    """Score a hypothetical shortlist against the last ``n_shows`` played
+    shows — test a working hypothesis BEFORE submitting it.
+
+    Returns per-show hits / hit_rate / recall (newest first), the means, and
+    per-slug hit counts across the window. Leakage-free (played history only).
+    Interpretation caveat: past-window frequency is not next-show probability —
+    rotation means a recently-hot song may be the one cooling down; cross-check
+    candidate_features (gap, played_prev_show) before acting on it.
+    """
+    return tools.backtest_shortlist(_get_conn(), slugs, n_shows=n_shows)
+
+
+@mcp.tool()
+def show_length_stats(years: int = 10) -> dict[str, Any]:
+    """Songs-per-show averages over the last ``years`` calendar years.
+
+    Calibration context for sizing your shortlist (20-40 songs) and its total
+    probability mass: probs should sum near the expected setlist size, and
+    ``avg_distinct_songs`` (~18-19 in the current era) is what your shortlist
+    is actually scored against.
+    """
+    return tools.show_length_stats(_get_conn(), years=years)
+
+
+@mcp.tool()
+def scoreboard(model_label: str | None = None, recent: int = 5) -> dict[str, Any]:
+    """Your track record + the heuristic baseline, so you can calibrate before
+    submitting. Use this to compare yourself against the heuristic baseline: the
+    per-model ``models`` aggregates include ``vs_heuristic`` (paired deltas vs the
+    baseline) and ``avg_n_rows``, and ``recent_shows`` shows the last few scored
+    shows' metrics/best_call/biggest_whiff for the heuristic plus your own track.
+
+    Pass ``model_label`` (your scoreboard identity, WITHOUT the ``mcp:`` prefix)
+    to see your own track alongside the heuristic; omit it for the baseline only.
+    Leakage-safe: scorecards only exist for already-played shows.
+    """
+    return tools.scoreboard(DEFAULT_SCORECARDS_DIR, model_label=model_label, recent=recent)
+
+
+@mcp.tool()
 def submit_prediction(
     showdate: str,
     model_label: str,
@@ -118,9 +175,9 @@ def submit_prediction(
 ) -> dict[str, Any]:
     """Submit per-song probabilities for a future show.
 
-    ``predictions`` is a list of ``{"slug": str, "prob": float in (0, 1]}``.
-    Unknown slugs and empty submissions are rejected. Probs are stored AS
-    SUBMITTED and written to
+    ``predictions`` is a list of ``{"slug": str, "prob": float in (0, 1]}`` with
+    between 20 and 40 songs. Unknown slugs, empty submissions, and shortlists
+    outside 20–40 songs are rejected. Probs are stored AS SUBMITTED and written to
     data/predictions/submitted/{model_label}/{showdate}.json for the next
     publish batch to fold in as source ``mcp:{model_label}``; at fold time they
     are published as submitted and scaled down only if their sum exceeds the
