@@ -83,7 +83,7 @@ enforce for the CLI), so an agent can't accidentally "see the future."
 | `recent_setlists(n=10)` | The last `n` played shows' setlists, oldest first, for tour context. |
 | `run_context(showdate)` | The multi-night run a show belongs to (same venue, contiguous), including already-played nights' setlists and still-future nights. |
 | `heuristic_prediction(showdate, half_life=50, top=30)` | The statistical heuristic baseline (`predict_show`, model="heuristic") as JSON, so the agent has something concrete to agree or disagree with. |
-| `show_length_stats(years=10)` | Songs-per-show averages (overall + by year) over the last `years` calendar years, anchored on the latest played show. Calibration context: `avg_distinct_songs` (~18–19 in the current era) is what a shortlist is scored against, and probs should sum near it. |
+| `show_length_stats(years=10)` | Songs-per-show averages (overall + by year) over the last `years` calendar years, anchored on the latest played show. Calibration context: `avg_distinct_songs` (~18–19 in the current era) is what a shortlist is scored against; a shortlist's probs sum to its expected hits (~6–9 for a 30-song list), never the full show size. |
 | `slot_propensities(slugs)` | Batch set-position tendencies: per song, P(slot \| played) over `set{1,2,3}-{open,mid,close}`/`encore` (era-weighted) plus the current era's set-structure stats (sets per show, songs per set). The data behind placement scoring — check it before calling openers/closers/encores. Unknown slugs come back under `unknown_slugs`. |
 | `backtest_shortlist(slugs, n_shows=20)` | Score a hypothetical shortlist against the last `n_shows` played shows: per-show hits/hit_rate/recall, means, and per-slug hit counts. Test a working hypothesis before submitting it. Leakage-free (played history only); remember rotation — past-window frequency ≠ next-show probability. |
 | `scoreboard(model_label=None, recent=5)` | Your own track record + the heuristic baseline from the published scorecards tier, so you can calibrate before submitting. Returns the per-model aggregate `models` (incl. `avg_n_rows` and `vs_heuristic`) and a compact `recent_shows` summary. Leakage-safe (scorecards only exist for already-played shows). |
@@ -250,8 +250,12 @@ Both benchmarks, every time:
 
 - `predictions` — the honest per-song probability shortlist (20–40 songs,
   probs in (0, 1]). Not renormalized up at publish, so a sparse list keeps
-  its stated probabilities; the sum should be near the expected setlist
-  size K (~19–20 songs in era 4).
+  its stated probabilities. Calibration: the sum should equal the number of
+  YOUR songs you expect to actually play — realistic recall for a 30-song
+  list is 35–50% of an ~18-song show, so an honest sum is ~6–9, NOT the
+  full setlist size K (only the whole catalog sums to K). Per-song
+  probabilities above ~0.40 need exceptional evidence; hot-rotation base
+  rates run ~0.20–0.35.
 - `setlist` — a full structured setlist call (`sets` "1"/"2"/"e", ordered,
   opener/closer conscious, ~17–20 songs total). This is the second benchmark;
   a submission without it sits out the setlist scorecard.
@@ -275,7 +279,8 @@ Research first (read tools, any order):
   heuristic baseline (paired vs_heuristic deltas, recent best calls and
   whiffs). Start here: know what you're beating and where you've been wrong.
 - show_length_stats() — songs-per-show averages. Your shortlist is scored
-  against ~18-19 distinct songs; your probs should sum near that.
+  against ~18-19 distinct songs; your probs should sum to your EXPECTED
+  HITS (~6-9 for a 30-song list), never to the full show size.
 - upcoming_shows() — confirm the target show(s) and note the `epoch`.
 - run_context(showdate) — the multi-night run; already-played nights matter.
 - recent_setlists(10) — current tour context.
@@ -304,7 +309,9 @@ submit_prediction(
   model_label="<MODEL_LABEL>",        # EXACTLY this string — it is your scoreboard identity
   predictions=[{"slug": ..., "prob": ...}, ...],
       # 20-40 songs, prob in (0,1], your honest per-song probabilities;
-      # they are NOT renormalized up, and the sum should be near ~19-20.
+      # NOT renormalized up. Sum = your expected hits (~6-9 for a 30-song
+      # list), NEVER ~18-20 — that's the whole catalog's sum, and inflating
+      # to it wrecks your Brier. Probs >0.40 need exceptional evidence.
   setlist={"sets": {"1": [...], "2": [...], "e": [...]}},
       # REQUIRED for the setlist benchmark: your full setlist call.
       # Ordered slugs, opener/closer conscious (first/last of each set are

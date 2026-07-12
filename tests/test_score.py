@@ -91,6 +91,29 @@ def test_score_show_metric_math_hand_computed():
     assert hits == {"tweezer": True, "ghost": False, "wilson": True, "hood": False}
 
 
+def test_score_show_caps_scored_rows_at_40():
+    # A statistical source's frozen doc carries its FULL ranking (hundreds of
+    # rows); scoring is capped to the top 40 so recall/Brier/missed_by_all sit
+    # on the same footing as the 20-40 submitted shortlists (§8).
+    filler = [
+        {"song": f"Filler {i}", "slug": f"filler-{i}", "prob": round(0.5 - i * 0.001, 4)}
+        for i in range(44)
+    ]
+    # yem ranked 45th: inside the full ranking, OUTSIDE the scored cap.
+    rows = filler + [{"song": "YEM", "slug": "yem", "prob": 0.01}]
+    payload = _frozen_payload(
+        {"heuristic": {"model": "heuristic", "kind": "statistical", "rows": rows}}
+    )
+    sc = score_show(payload, PLAYED)
+
+    src = sc["sources"]["heuristic"]
+    assert src["n_rows"] == 40
+    assert len(src["rows"]) == 40
+    # yem played but sits below the cap -> not recalled, and missed by all.
+    assert src["metrics"]["recall"] == 0.0
+    assert {s["slug"] for s in sc["missed_by_all"]} == {"tweezer", "wilson", "yem"}
+
+
 def test_score_show_best_call_null_when_no_hits():
     rows = [
         {"song": "Ghost", "slug": "ghost", "prob": 0.6},

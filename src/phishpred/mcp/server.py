@@ -143,9 +143,10 @@ def show_length_stats(years: int = 10) -> dict[str, Any]:
     """Songs-per-show averages over the last ``years`` calendar years.
 
     Calibration context for sizing your shortlist (20-40 songs) and its total
-    probability mass: probs should sum near the expected setlist size, and
-    ``avg_distinct_songs`` (~18-19 in the current era) is what your shortlist
-    is actually scored against.
+    probability mass. ``avg_distinct_songs`` (~18-19 in the current era) is
+    what your shortlist is scored against — but your probs should sum to your
+    EXPECTED HITS (~6-9 for a 30-song list), never to the full show size;
+    only the whole catalog sums to that.
     """
     return tools.show_length_stats(_get_conn(), years=years)
 

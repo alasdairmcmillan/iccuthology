@@ -77,9 +77,15 @@ tools.backtest_shortlist(conn, slugs)    # score a hypothesis against recent pla
 Calibration notes from the scored record (why the first two tools matter):
 
 - Your `predictions` list must be 20–40 songs; its scored hit rate uses your
-  top 20. Shows average ~18–19 distinct songs in the current era, so a
-  20-song list is a full "call the show" attempt and probs should sum near
-  that.
+  top 20. Shows average ~18–19 distinct songs in the current era.
+- CALIBRATION (this is where the Brier is won or lost): your probs should
+  sum to the number of YOUR songs you expect to actually play — realistic
+  recall for a 30-song list is 35–50% of an 18-song show, so an honest sum
+  is ~6–9, NOT ~18. Only the full 400-song catalog sums to the show size K.
+  Historical base rates for even the hottest rotation songs are ~0.20–0.35
+  per show (cross-check with `backtest_shortlist`); probabilities above
+  ~0.40 need genuinely exceptional evidence. Under-sums are preserved
+  as-is at publish (probs are never scaled UP).
 - `scoreboard(...)` shows your `vs_heuristic` paired deltas — if you're
   losing to the baseline, study its recent takes before submitting more of
   the same.

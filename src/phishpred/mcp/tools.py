@@ -447,7 +447,9 @@ def backtest_shortlist(
 def show_length_stats(conn: sqlite3.Connection, years: int = 10) -> dict[str, Any]:
     """Songs-per-show distribution over the last ``years`` calendar years —
     calibration context for sizing a shortlist and its total probability mass
-    (§5 ground rules: probs should sum near the expected setlist size).
+    (§5 ground rules: a shortlist's probs sum to its EXPECTED HITS — roughly
+    recall x avg_distinct_songs, ~6-9 for a 30-song list — never to the full
+    show size, which only the whole catalog sums to).
 
     Anchored on the latest PLAYED showdate in the DB (not the wall clock), so
     the window is reproducible and leakage-safe: the returned span covers the
