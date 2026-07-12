@@ -509,6 +509,64 @@ def test_submit_prediction_honors_explicit_epoch_and_timestamp(conn, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# slot_propensities (read tool) — set-position tendencies + era structure
+# ---------------------------------------------------------------------------
+
+def test_slot_propensities_per_song_and_structure(conn):
+    # tweezer opens every fixture set (position 0); wilson always closes.
+    result = tools.slot_propensities(conn, ["tweezer", "wilson"])
+    assert result["unknown_slugs"] == []
+    tw = result["songs"]["tweezer"]
+    assert tw["n_plays"] == 6
+    assert tw["slots"] == {"set1-open": 1.0}
+    wi = result["songs"]["wilson"]
+    assert wi["n_plays"] == 4
+    assert wi["slots"] == {"set1-close": 1.0}
+    # Era of the latest played show (2026) is 4.0; every fixture show qualifies.
+    st = result["set_structure"]
+    assert st["era"] == "4.0"
+    assert st["n_shows"] == 6
+    assert st["set_lengths"]["1"]["mean"] == pytest.approx(14 / 6, abs=0.01)
+    assert st["num_sets_dist"] == {"1": 6}
+
+
+def test_slot_propensities_collects_unknown_slugs(conn):
+    result = tools.slot_propensities(conn, ["tweezer", "not-a-song"])
+    assert result["unknown_slugs"] == ["not-a-song"]
+    assert list(result["songs"]) == ["tweezer"]
+
+
+# ---------------------------------------------------------------------------
+# backtest_shortlist (read tool) — hypothesis check over played shows
+# ---------------------------------------------------------------------------
+
+def test_backtest_shortlist_scores_recent_shows(conn):
+    # Last 3 played by show_index desc: show 10 (101,103), 5 (101,102), 4 (all).
+    result = tools.backtest_shortlist(conn, ["tweezer", "yem"], n_shows=3)
+    assert result["n_shows"] == 3
+    assert [r["showdate"] for r in result["shows"]] == [
+        "2026-07-08", "2022-06-11", "2022-06-10",
+    ]
+    assert [r["hits"] for r in result["shows"]] == [1, 2, 2]
+    assert result["shows"][0]["hit_rate"] == pytest.approx(0.5)
+    assert result["shows"][0]["recall"] == pytest.approx(0.5)
+    assert result["shows"][2]["recall"] == pytest.approx(2 / 3, abs=0.001)
+    assert result["mean_hit_rate"] == pytest.approx((0.5 + 1.0 + 1.0) / 3, abs=0.001)
+    assert result["per_slug"] == {"tweezer": 3, "yem": 2}
+
+
+def test_backtest_shortlist_rejects_bad_input(conn):
+    with pytest.raises(ValueError, match="empty"):
+        tools.backtest_shortlist(conn, [])
+    with pytest.raises(ValueError, match="unknown slug"):
+        tools.backtest_shortlist(conn, ["tweezer", "not-a-song"])
+    with pytest.raises(ValueError, match="duplicate"):
+        tools.backtest_shortlist(conn, ["tweezer", "tweezer"])
+    with pytest.raises(ValueError, match="at most"):
+        tools.backtest_shortlist(conn, [f"s{i}" for i in range(41)])
+
+
+# ---------------------------------------------------------------------------
 # show_length_stats (read tool) — songs-per-show calibration context
 # ---------------------------------------------------------------------------
 

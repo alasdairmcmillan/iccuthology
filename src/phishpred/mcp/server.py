@@ -24,7 +24,7 @@ Or run it directly from the repo root:
 Tools (deploy plan §5a):
   read:  upcoming_shows, candidate_features, song_history, venue_history,
          recent_setlists, run_context, heuristic_prediction, show_length_stats,
-         scoreboard
+         slot_propensities, backtest_shortlist, scoreboard
   write: submit_prediction  (writes to data/predictions/submitted/, never to
          core tables -- see deploy plan §9: treat submissions as untrusted)
 
@@ -108,6 +108,34 @@ def heuristic_prediction(showdate: str, half_life: int = 50, top: int = 30) -> d
     """The statistical heuristic baseline prediction for a show, so an agent
     can argue with it rather than starting from nothing."""
     return tools.heuristic_prediction(_get_conn(), showdate, half_life=half_life, top=top)
+
+
+@mcp.tool()
+def slot_propensities(slugs: list[str]) -> dict[str, Any]:
+    """Set-position tendencies for a batch of songs, plus the current era's
+    set-structure stats (sets per show, songs per set).
+
+    Use this BEFORE placing your setlist call: openers/closers/encore are
+    scored as marquee calls and exact slots earn the weighted score, so check
+    where each song actually tends to sit (e.g. is it a set2-open song or an
+    encore song?). Pass your whole draft setlist in one call. Unknown slugs
+    come back under ``unknown_slugs`` instead of raising.
+    """
+    return tools.slot_propensities(_get_conn(), slugs)
+
+
+@mcp.tool()
+def backtest_shortlist(slugs: list[str], n_shows: int = 20) -> dict[str, Any]:
+    """Score a hypothetical shortlist against the last ``n_shows`` played
+    shows — test a working hypothesis BEFORE submitting it.
+
+    Returns per-show hits / hit_rate / recall (newest first), the means, and
+    per-slug hit counts across the window. Leakage-free (played history only).
+    Interpretation caveat: past-window frequency is not next-show probability —
+    rotation means a recently-hot song may be the one cooling down; cross-check
+    candidate_features (gap, played_prev_show) before acting on it.
+    """
+    return tools.backtest_shortlist(_get_conn(), slugs, n_shows=n_shows)
 
 
 @mcp.tool()

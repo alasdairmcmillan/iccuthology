@@ -302,6 +302,148 @@ def recent_setlists(conn: sqlite3.Connection, n: int = 10) -> dict[str, Any]:
     return {"shows": out}
 
 
+def slot_propensities(conn: sqlite3.Connection, slugs: list[str]) -> dict[str, Any]:
+    """Per-song set-position tendencies plus the current era's set-structure
+    stats — the data behind a setlist call's placement (§8 scores opener/closer
+    marquee calls, right-set placement, and exact slots; this is how an agent
+    earns them on purpose rather than by luck).
+
+    ``slugs`` is a batch (one call for a whole draft setlist). Per known slug:
+    ``{"n_plays": int, "slots": {slot: P(slot | played)}}`` over the buckets
+    ``set{1,2,3}-{open,mid,close}`` and ``encore``, era-weighted (recent eras
+    dominate, so a song's 90s role doesn't drown out its current one — see
+    ``slots.slot_propensities``). Unknown slugs are collected under
+    ``unknown_slugs`` rather than raising, so one typo doesn't sink a batch.
+
+    ``set_structure`` summarizes the CURRENT era's show skeleton (era of the
+    latest played show): shows counted, sets-per-show / encores-per-show
+    distributions, and mean±std length per set label — the live version of the
+    "~9 songs set 1, ~7-8 set 2, 1-2 encore" playbook prose.
+    """
+    from phishpred import slots as slots_mod
+    from phishpred.config import era_for_year
+
+    known = {
+        str(r["slug"]): int(r["songid"])
+        for r in conn.execute("SELECT slug, songid FROM songs")
+    }
+    requested = [str(s) for s in slugs]
+    unknown = [s for s in requested if s not in known]
+    wanted_ids = {known[s]: s for s in requested if s in known}
+
+    props = slots_mod.slot_propensities(conn) if wanted_ids else {}
+    counts = slots_mod.slot_counts(conn) if wanted_ids else {}
+
+    songs_out: dict[str, Any] = {}
+    for songid, slug in wanted_ids.items():
+        slot_probs = props.get(songid)
+        if slot_probs is None:  # known song, zero recorded plays
+            songs_out[slug] = {"n_plays": 0, "slots": {}}
+            continue
+        songs_out[slug] = {
+            "n_plays": sum(counts.get(songid, {}).values()),
+            "slots": {
+                slot: round(p, 3)
+                for slot, p in sorted(slot_probs.items(), key=lambda kv: -kv[1])
+            },
+        }
+
+    latest = conn.execute(
+        "SELECT MAX(showdate) AS d FROM shows "
+        "WHERE exclude = 0 AND show_index IS NOT NULL"
+    ).fetchone()
+    structure_out: dict[str, Any] = {}
+    if latest is not None and latest["d"] is not None:
+        era = era_for_year(int(str(latest["d"])[:4]))
+        st = slots_mod.set_structure_stats(conn, era=era)
+        structure_out = {
+            "era": era,
+            "n_shows": st["n_shows"],
+            "num_sets_dist": {str(k): v for k, v in sorted(st["num_sets_dist"].items())},
+            "num_encores_dist": {str(k): v for k, v in sorted(st["num_encores_dist"].items())},
+            "set_lengths": {
+                lbl: {"mean": round(s["mean"], 2), "std": round(s["std"], 2)}
+                for lbl, s in st["set_lengths"].items()
+            },
+        }
+
+    return {"songs": songs_out, "unknown_slugs": unknown, "set_structure": structure_out}
+
+
+def backtest_shortlist(
+    conn: sqlite3.Connection, slugs: list[str], n_shows: int = 20
+) -> dict[str, Any]:
+    """Score a hypothetical shortlist against the last ``n_shows`` PLAYED shows
+    — the "test my working hypothesis before submitting" loop. Leakage-free by
+    construction: it only ever reads played history.
+
+    ``slugs`` is the candidate shortlist (1-40 distinct known slugs; unknown or
+    duplicate slugs raise ``ValueError`` — a typo silently scoring 0 would
+    corrupt the experiment). Per show (newest first): distinct songs played,
+    how many of the shortlist hit, ``hit_rate`` (hits / shortlist length) and
+    ``recall`` (hits / songs played). ``per_slug`` counts each slug's hits
+    across the window — which parts of the hypothesis carry it.
+
+    Caveat for interpretation (also in the ground rules): rotation means a
+    song's past-window frequency is NOT its next-show probability — a song that
+    hit 5 of the last 10 shows may be exactly the one cooling down next.
+    """
+    if not slugs:
+        raise ValueError("slugs must not be empty")
+    if len(slugs) > _MAX_SHORTLIST:
+        raise ValueError(f"slugs must have at most {_MAX_SHORTLIST} entries, got {len(slugs)}")
+    if len(set(slugs)) != len(slugs):
+        raise ValueError("duplicate slugs in shortlist")
+    known = {str(r["slug"]) for r in conn.execute("SELECT slug FROM songs")}
+    unknown = [s for s in slugs if s not in known]
+    if unknown:
+        raise ValueError(f"unknown slug(s): {', '.join(map(str, unknown))}")
+
+    shows = conn.execute(
+        "SELECT s.showid AS showid, s.showdate AS showdate, v.name AS venue_name "
+        "FROM shows s LEFT JOIN venues v ON v.venueid = s.venueid "
+        "WHERE s.exclude = 0 AND s.show_index IS NOT NULL "
+        "ORDER BY s.show_index DESC LIMIT ?",
+        (max(int(n_shows), 0),),
+    ).fetchall()
+
+    shortlist = set(slugs)
+    per_slug = {s: 0 for s in slugs}
+    rows: list[dict[str, Any]] = []
+    for show in shows:
+        played = {
+            str(r["slug"])
+            for r in conn.execute(
+                "SELECT DISTINCT sg.slug AS slug FROM performances p "
+                "JOIN songs sg ON sg.songid = p.songid WHERE p.showid = ?",
+                (show["showid"],),
+            )
+        }
+        hit_slugs = shortlist & played
+        for s in hit_slugs:
+            per_slug[s] += 1
+        rows.append(
+            {
+                "showdate": show["showdate"],
+                "venue_name": show["venue_name"],
+                "n_played": len(played),
+                "hits": len(hit_slugs),
+                "hit_rate": round(len(hit_slugs) / len(slugs), 4),
+                "recall": round(len(hit_slugs) / len(played), 4) if played else 0.0,
+            }
+        )
+
+    n = len(rows)
+    return {
+        "n_slugs": len(slugs),
+        "n_shows": n,
+        "mean_hit_rate": round(sum(r["hit_rate"] for r in rows) / n, 4) if n else 0.0,
+        "mean_recall": round(sum(r["recall"] for r in rows) / n, 4) if n else 0.0,
+        "shows": rows,
+        "per_slug": per_slug,
+    }
+
+
 def show_length_stats(conn: sqlite3.Connection, years: int = 10) -> dict[str, Any]:
     """Songs-per-show distribution over the last ``years`` calendar years —
     calibration context for sizing a shortlist and its total probability mass

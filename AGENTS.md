@@ -70,6 +70,8 @@ tools.candidate_features(conn, showdate) # feature frame: decayed_rate, gap, pla
 tools.heuristic_prediction(conn, showdate)  # the statistical baseline — beat it, don't copy it
 tools.song_history(conn, slug)           # deep-dive one song
 tools.venue_history(conn, venue)         # what this venue tends to get
+tools.slot_propensities(conn, slugs)     # where each song sits (open/mid/close/encore) — place your setlist call on data
+tools.backtest_shortlist(conn, slugs)    # score a hypothesis against recent played shows BEFORE submitting it
 ```
 
 Calibration notes from the scored record (why the first two tools matter):
@@ -123,8 +125,11 @@ tools.submit_prediction(
   era).
 - `setlist`: your full structured setlist call — the second benchmark.
   Ordered slugs, opener/closer conscious (first/last of each set score as
-  marquee calls; exact positions earn the sharpshooter badge). Typical
-  shape: ~9 songs set 1, ~7–8 set 2, 1–2 encore; ≤40 total; no slug twice
+  marquee calls; exact positions earn the sharpshooter badge and boost the
+  weighted score). Check `slot_propensities` for your draft — an "encore
+  song" called as the set 1 opener throws away marquee points. Typical
+  shape: ~9 songs set 1, ~7–8 set 2, 1–2 encore (live numbers:
+  `slot_propensities(...)["set_structure"]`); ≤40 total; no slug twice
   anywhere; only slugs you have seen in a tool result.
 - `rationale`: REQUIRED and **specific to that show** — 2–5 sentences on
   what you leaned on, where you disagree with the heuristic baseline, and

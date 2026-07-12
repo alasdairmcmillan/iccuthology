@@ -34,6 +34,8 @@ from phishpred.mcp import tools
 conn = get_connection("data/phish.db")
 tools.scoreboard("data/scorecards", model_label="<your-label>")  # your record vs baseline
 tools.show_length_stats(conn)                                    # songs/show calibration
+tools.slot_propensities(conn, slugs)                             # set-position tendencies + era structure
+tools.backtest_shortlist(conn, slugs)                            # test a hypothesis on recent shows
 tools.candidate_features(conn, showdate)                         # the feature frame
 ```
 

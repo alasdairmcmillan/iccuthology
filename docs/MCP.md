@@ -84,6 +84,8 @@ enforce for the CLI), so an agent can't accidentally "see the future."
 | `run_context(showdate)` | The multi-night run a show belongs to (same venue, contiguous), including already-played nights' setlists and still-future nights. |
 | `heuristic_prediction(showdate, half_life=50, top=30)` | The statistical heuristic baseline (`predict_show`, model="heuristic") as JSON, so the agent has something concrete to agree or disagree with. |
 | `show_length_stats(years=10)` | Songs-per-show averages (overall + by year) over the last `years` calendar years, anchored on the latest played show. Calibration context: `avg_distinct_songs` (~18–19 in the current era) is what a shortlist is scored against, and probs should sum near it. |
+| `slot_propensities(slugs)` | Batch set-position tendencies: per song, P(slot \| played) over `set{1,2,3}-{open,mid,close}`/`encore` (era-weighted) plus the current era's set-structure stats (sets per show, songs per set). The data behind placement scoring — check it before calling openers/closers/encores. Unknown slugs come back under `unknown_slugs`. |
+| `backtest_shortlist(slugs, n_shows=20)` | Score a hypothetical shortlist against the last `n_shows` played shows: per-show hits/hit_rate/recall, means, and per-slug hit counts. Test a working hypothesis before submitting it. Leakage-free (played history only); remember rotation — past-window frequency ≠ next-show probability. |
 | `scoreboard(model_label=None, recent=5)` | Your own track record + the heuristic baseline from the published scorecards tier, so you can calibrate before submitting. Returns the per-model aggregate `models` (incl. `avg_n_rows` and `vs_heuristic`) and a compact `recent_shows` summary. Leakage-safe (scorecards only exist for already-played shows). |
 | `submit_prediction(showdate, model_label, predictions, rationale=None, setlist=None)` | **Write tool.** Submits per-song probabilities (20–40 songs) and a structured setlist call for a future show. |
 
@@ -282,6 +284,11 @@ Research first (read tools, any order):
 - venue_history(...) and song_history(slug) for songs you want to check.
 - heuristic_prediction(showdate) — the statistical baseline. Beat it, don't
   copy it.
+- slot_propensities([...your draft setlist...]) — where each song actually
+  tends to sit (openers/closers/encore are scored; place them on data).
+- backtest_shortlist([...candidate slugs...]) — how your working hypothesis
+  would have scored over recent shows. Test before you submit; but remember
+  rotation: a song that hit 5 of the last 10 may be the one cooling down.
 
 Hard rules:
 - Phish essentially never repeats a song within a multi-night same-venue
