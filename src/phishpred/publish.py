@@ -102,7 +102,7 @@ def _slice_result(result: SimResult, positions: list[int], showids: list[int]) -
 def _tour_tracker(conn: sqlite3.Connection, tour_id: str, as_of: str | None) -> dict:
     """Per-tour "plays-so-far" tracker (DEPLOY-CONTRACTS §3): how many of the
     tour's shows have been played (indexed) and, per song, how many of those
-    played shows featured it.
+    played shows featured it (plus which dates).
 
     A tour's shows are every non-excluded show whose ``tour_name`` maps to
     ``tour_id`` (``tour_id_for``); its PLAYED shows are the complement of
@@ -122,21 +122,26 @@ def _tour_tracker(conn: sqlite3.Connection, tour_id: str, as_of: str | None) -> 
         if r["show_index"] is not None:
             played_showids.append(int(r["showid"]))
 
-    counts: dict[str, int] = {}
+    dates: dict[str, list[str]] = {}
     if played_showids:
         placeholders = ",".join("?" for _ in played_showids)
         for row in conn.execute(
-            "SELECT so.slug AS slug, COUNT(DISTINCT p.showid) AS c "
-            "FROM performances p JOIN songs so ON so.songid = p.songid "
-            f"WHERE p.showid IN ({placeholders}) GROUP BY p.songid",
+            "SELECT so.slug AS slug, s.showdate AS showdate "
+            "FROM performances p "
+            "JOIN songs so ON so.songid = p.songid "
+            "JOIN shows s ON s.showid = p.showid "
+            f"WHERE p.showid IN ({placeholders}) "
+            "GROUP BY so.slug, s.showdate ORDER BY so.slug, s.showdate",
             played_showids,
         ):
-            counts[row["slug"]] = int(row["c"])
+            dates.setdefault(row["slug"], []).append(row["showdate"])
+    counts = {slug: len(d) for slug, d in dates.items()}
 
     return {
         "n_shows_played": len(played_showids),
         "n_shows_total": n_total,
         "played_counts": counts,
+        "played_dates": dates,
         "as_of": as_of,
     }
 

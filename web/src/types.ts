@@ -62,6 +62,8 @@ export interface TourTracker {
   n_shows_total: number;
   /** slug -> # played tour shows featuring it (distinct per show) */
   played_counts: Record<string, number>;
+  /** slug -> sorted showdates it played on; length == played_counts[slug] */
+  played_dates: Record<string, string[]>;
   /** = meta.created_at */
   as_of: string;
 }
