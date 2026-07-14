@@ -103,6 +103,7 @@ never part of the frozen doc):
     "n_shows_played": 4,               // indexed (played) shows in this tour so far
     "n_shows_total": 21,               // all non-excluded shows in the tour
     "played_counts": {"tweezer": 2, "harry-hood": 1},  // slug -> # played tour shows featuring it (distinct per show)
+    "played_dates": {"tweezer": ["2026-07-05", "2026-07-08"], "harry-hood": ["2026-07-06"]},  // slug -> sorted showdates it played on; len == played_counts[slug]
     "as_of": "2026-07-12T00:00:00Z"    // = meta.created_at (injectable; never a bare now())
   }
 }

@@ -14,14 +14,15 @@ To regenerate predictions after new setlists are posted, run:
 .\.venv\Scripts\python.exe agents/antigravity/make_predictions.py
 ```
 This script automates the following steps:
-1. **Discount Run Repeats (Monty Hall rule):** Checks the `run_context` of each target show. Any song played in a prior night of the same run is set to `0.0` probability and excluded from the setlist.
+1. **Chronological Joint-Consistency & Tour-Rotation Discounts:** Checks the `run_context` of each target show. Since future shows are unplayed, it tracks simulated setlists chronologically. Any song called in a simulated setlist on a prior night of the same run is set to `0.0` probability and excluded. Additionally, any song played/called on the immediately preceding tour stop is discounted to `0.02` probability (tour rotation limit).
 2. **Venue-Specific Boosts:** Compares canonical venue historical play rates to era-wide rates using `venue_history`. If a song is played more frequently at this venue than average, its base rate is boosted (capped at `1.30`).
 3. **Probability Calibration:** Computes a 20-show backtest of the selected 30-song shortlist to find its historical recall $R$. It then renormalizes the shortlist scores using water-filling to sum to exactly $R \times 18.25$ (the expected number of hits). This ensures the model is perfectly calibrated to avoid Brier score/log loss penalties.
 4. **Structured Setlist Builder:** Maximize sharpshooter and marquee points using slot propensities:
    - Encore: Greedy selection from the top songs with high `encore` slot propensity.
    - Set openers/closers: Selected based on `set1-open`, `set1-close`, `set2-open`, `set2-close` propensities.
    - Set mid songs: Automatically filled and divided between Set 1 and Set 2 based on slot likelihood.
-5. **Rationales:** Automatically constructs unique, show-specific rationales detailing the venue, run night, discounted songs, and key due selections.
+5. **Rationales:** Automatically constructs unique, show-specific rationales detailing the venue, run night, simulated/real discounted songs, and key due selections.
+
 
 ## Verifying & Publishing
 After running `make_predictions.py`, verify that all files are valid:

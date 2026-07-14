@@ -565,6 +565,7 @@ def test_tour_tracker_counts_played_shows(conn, tmp_path):
     assert tr["n_shows_played"] == 1          # the one played tour show
     assert tr["n_shows_total"] == 4           # 1 played + 3 future
     assert tr["played_counts"] == {"tweezer": 1, "wilson": 1}
+    assert tr["played_dates"] == {"tweezer": ["2026-07-05"], "wilson": ["2026-07-05"]}
     assert tr["as_of"] == "2026-07-09T00:00:00Z"
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 interface StatPopoverProps {
   trigger: React.ReactNode;
@@ -6,12 +6,16 @@ interface StatPopoverProps {
   children: React.ReactNode;
 }
 
+// Keep-on-screen margin from the viewport edge, in px.
+const EDGE_MARGIN = 8;
+
 /** Hover (mouse) or tap (touch) trigger for a small fixed-position stat card.
  *  Mirrors the outside-click-dismiss pattern used by the header search. */
 export default function StatPopover({ trigger, triggerClassName, children }: StatPopoverProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const anchorRef = useRef<HTMLSpanElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
   const closeTimer = useRef<number | null>(null);
   const supportsHover = useRef(
     typeof window !== "undefined" && window.matchMedia("(hover: hover)").matches,
@@ -55,6 +59,28 @@ export default function StatPopover({ trigger, triggerClassName, children }: Sta
 
   useEffect(() => () => cancelClose(), []);
 
+  // The initial `openAt()` position centers the popover under the anchor
+  // without knowing its actual rendered size — fine on desktop, but on
+  // narrow viewports a centered popover near an edge clips off-screen. Once
+  // mounted, re-measure and clamp both axes into the viewport (flipping
+  // above the anchor if there's no room below).
+  useLayoutEffect(() => {
+    if (!open) return;
+    const anchorRect = anchorRef.current?.getBoundingClientRect();
+    const popRect = popRef.current?.getBoundingClientRect();
+    if (!anchorRect || !popRect) return;
+    const halfW = popRect.width / 2;
+    const maxLeft = window.innerWidth - halfW - EDGE_MARGIN;
+    const minLeft = halfW + EDGE_MARGIN;
+    const left = Math.min(Math.max(anchorRect.left + anchorRect.width / 2, minLeft), maxLeft);
+    let top = anchorRect.bottom + 6;
+    if (top + popRect.height > window.innerHeight - EDGE_MARGIN) {
+      top = anchorRect.top - popRect.height - 6;
+    }
+    top = Math.max(EDGE_MARGIN, top);
+    if (top !== pos?.top || left !== pos?.left) setPos({ top, left });
+  }, [open, pos]);
+
   return (
     <span
       ref={anchorRef}
@@ -70,6 +96,7 @@ export default function StatPopover({ trigger, triggerClassName, children }: Sta
       {trigger}
       {open && pos && (
         <div
+          ref={popRef}
           className="stat-pop"
           style={{ top: pos.top, left: pos.left }}
           onMouseEnter={supportsHover ? cancelClose : undefined}

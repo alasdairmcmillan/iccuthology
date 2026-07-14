@@ -158,19 +158,28 @@ Submissions are local files until pushed to the R2 `submitted/` prefix. From the
 
 Using `uv` and `dotenv` CLI:
 ```bash
-python -m uv run dotenv -f .env.local run -- python scripts/r2_push.py data/predictions/submitted submitted
+python -m uv run --extra deploy dotenv -f .env.local run -- python scripts/r2_push.py data/predictions/submitted submitted
 ```
+
+`boto3` (needed by `scripts/r2_push.py`) is gated behind the `deploy` extra
+in `pyproject.toml`, NOT a base dependency — `uv run` only syncs base
+dependencies unless told otherwise, so omitting `--extra deploy` (or
+`--group dev`) fails with `ModuleNotFoundError: No module named 'boto3'`.
 
 Or using the direct Python fallback (recommended if `uv` or `dotenv` CLI is not available):
 ```bash
 # If uv is not available, run: .\.venv\Scripts\python.exe ...
 python -c "from phishpred.config import _load_env; _load_env(); from scripts.r2_push import main; main(['data/predictions/submitted', 'submitted'])"
 ```
+This only works if the interpreter you invoke already has `boto3`
+installed (check with `python -c "import boto3"` first) — e.g. a `.venv`
+that was previously synced with `uv sync --extra deploy` or `--group dev`.
 
 (R2 credentials live in `.env.local`.) The push changes the epoch's
 manifest hash, so the next scheduled publish run folds your track in as
 source `mcp:<label>` automatically. If the push fails (missing creds, no
-network), STOP and tell the human — do not consider the task done.
+network, or missing `boto3`), STOP and tell the human — do not consider the
+task done.
 
 ### 7. Report
 

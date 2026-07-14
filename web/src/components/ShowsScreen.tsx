@@ -28,6 +28,11 @@ interface ShowsScreenProps {
   setlistsByDate: Record<string, SetlistPrediction | null>;
   selectedShows: string[];
   onChangeSelected: (next: string[]) => void;
+  /** Which mode to mount in — e.g. the Tours page's standings panel links
+   *  straight to "past" scorecards. Only read once, on mount (this screen
+   *  fully unmounts/remounts on every screen switch, so a plain initial
+   *  value is enough — no need to react to prop changes after that). */
+  initialMode?: "upcoming" | "past";
 }
 
 interface ModelOption {
@@ -229,6 +234,7 @@ export default function ShowsScreen({
   setlistsByDate,
   selectedShows,
   onChangeSelected,
+  initialMode,
 }: ShowsScreenProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [setlistNight, setSetlistNight] = useState<string | null>(null);
@@ -241,7 +247,7 @@ export default function ShowsScreen({
   // Past-scorecard mode (DEPLOY-CONTRACTS §8). Default view stays FUTURE
   // predictions; the scoreboard is lazy-fetched on the first toggle and cached
   // in this component's state so switching back and forth is instant.
-  const [mode, setMode] = useState<"upcoming" | "past">("upcoming");
+  const [mode, setMode] = useState<"upcoming" | "past">(initialMode ?? "upcoming");
   const [scoreboard, setScoreboard] = useState<Scoreboard | null>(null);
   const [scoreboardError, setScoreboardError] = useState<string | null>(null);
   const [pastDate, setPastDate] = useState<string | null>(null);
@@ -251,12 +257,14 @@ export default function ShowsScreen({
   // Which take of the active source is shown — "final" (the top-level,
   // official-benchmark entry) or a prior version's index (§8 versioning).
   const [versionSel, setVersionSel] = useState<number | "final">("final");
-  // Standings sort — numeric columns only; default hit_rate_top20 desc.
-  const [sortCol, setSortCol] = useState<SortCol>("hit_rate_top20");
+  // Standings sort — numeric columns only; default setlist hit rate desc.
+  const [sortCol, setSortCol] = useState<SortCol>("setlist_hit_rate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  // Pager for the (30–40 row) frozen shortlist in past mode.
+  // Pager for the (30–40 row) frozen shortlist in past mode — fixed at 20
+  // rather than the shared dynamic songPageSize(): this list is a probability
+  // ranking, and 20 lines up with the standard top-20 hit-rate window.
   const [shortlistPage, setShortlistPage] = useState(0);
-  const [shortlistPageRows] = useState(songPageSize);
+  const [shortlistPageRows] = useState(20);
 
   // Dismiss the night picker on outside click or Escape.
   useEffect(() => {
@@ -787,11 +795,11 @@ export default function ShowsScreen({
                   <div className="standings-grid standings-head">
                     <span>Model</span>
                     <span>Kind</span>
+                    {sortHeader("setlist_hit_rate", "Setlist", METRIC_TIPS.setlistHitRate)}
+                    {sortHeader("placed_rate", "Placed", METRIC_TIPS.placedRate)}
                     {sortHeader("n_shows", "Shows", METRIC_TIPS.shows)}
                     {sortHeader("hit_rate_top20", "Hit·20", hitRateTip(20))}
                     {sortHeader("recall", "Recall", METRIC_TIPS.recall)}
-                    {sortHeader("setlist_hit_rate", "Setlist", METRIC_TIPS.setlistHitRate)}
-                    {sortHeader("placed_rate", "Placed", METRIC_TIPS.placedRate)}
                     {sortHeader("brier", "Brier", METRIC_TIPS.brier)}
                     {sortHeader("avg_n_rows", "List", METRIC_TIPS.list)}
                     {sortHeader("vs_heuristic", "vs heur", METRIC_TIPS.vsHeuristic)}
@@ -802,13 +810,6 @@ export default function ShowsScreen({
                     <div className="standings-grid standings-row" key={key}>
                       <span className="standings-model">{key}</span>
                       <span className="standings-dim">{m.kind}</span>
-                      <span style={{ textAlign: "right" }}>{m.n_shows}</span>
-                      <span className="standings-val" style={{ textAlign: "right" }}>
-                        {pct1(m.hit_rate_top20)}
-                      </span>
-                      <span className="standings-val" style={{ textAlign: "right" }}>
-                        {pct1(m.recall)}
-                      </span>
                       <span
                         className={m.setlist ? "standings-val" : "standings-dim"}
                         style={{ textAlign: "right" }}
@@ -820,6 +821,13 @@ export default function ShowsScreen({
                         style={{ textAlign: "right" }}
                       >
                         {m.setlist ? pct1(m.setlist.placed_rate) : "—"}
+                      </span>
+                      <span style={{ textAlign: "right" }}>{m.n_shows}</span>
+                      <span className="standings-val" style={{ textAlign: "right" }}>
+                        {pct1(m.hit_rate_top20)}
+                      </span>
+                      <span className="standings-val" style={{ textAlign: "right" }}>
+                        {pct1(m.recall)}
                       </span>
                       <span style={{ textAlign: "right" }}>{m.brier.toFixed(3)}</span>
                       <span style={{ textAlign: "right" }}>{m.avg_n_rows.toFixed(1)}</span>
@@ -1110,38 +1118,13 @@ export default function ShowsScreen({
                   )}
                 </div>
 
-                {/* TWO-COLUMN ROW: frozen shortlist rows (left) | scored setlist
-                    call (right). */}
+                {/* TWO-COLUMN ROW: what played + scored setlist call (left) |
+                    frozen shortlist rows (right). Setlist-call content leads
+                    (§ ask: setlist above shortlist) — on mobile the row
+                    stacks in this same source order, so it reads setlist
+                    card on top, shortlist card below. */}
                 <div className="shows-row">
-                  {/* LEFT: shortlist rows */}
-                  <div className="card shows-card">
-                    <div className="set-section">
-                      <div className="set-label">Shortlist · frozen P(played) · hit / miss</div>
-                      {shownTake.rows
-                        .slice(
-                          shortlistPage * shortlistPageRows,
-                          (shortlistPage + 1) * shortlistPageRows,
-                        )
-                        .map((r) => (
-                          <div
-                            className={"score-row" + (r.hit ? " hit" : " miss")}
-                            key={r.slug}
-                          >
-                            <span className="score-mark">{r.hit ? "✓" : "×"}</span>
-                            <span className="score-name">{r.song}</span>
-                            <span className="score-prob">{pct1(r.prob)}</span>
-                          </div>
-                        ))}
-                      <Pager
-                        page={shortlistPage}
-                        totalRows={shownTake.rows.length}
-                        pageSize={shortlistPageRows}
-                        onPage={setShortlistPage}
-                      />
-                    </div>
-                  </div>
-
-                  {/* RIGHT: what played + the scored setlist call, one panel —
+                  {/* LEFT: what played + the scored setlist call, one panel —
                       actual setlist chips on top (missed-by-all marked inline),
                       the model's ordered call scored against it below. */}
                   <div className="card shows-card">
@@ -1236,6 +1219,34 @@ export default function ShowsScreen({
                     >
                       full setlist on phish.net →
                     </a>
+                  </div>
+
+                  {/* RIGHT: shortlist rows */}
+                  <div className="card shows-card">
+                    <div className="set-section">
+                      <div className="set-label">Shortlist · frozen P(played) · hit / miss</div>
+                      {shownTake.rows
+                        .slice(
+                          shortlistPage * shortlistPageRows,
+                          (shortlistPage + 1) * shortlistPageRows,
+                        )
+                        .map((r) => (
+                          <div
+                            className={"score-row" + (r.hit ? " hit" : " miss")}
+                            key={r.slug}
+                          >
+                            <span className="score-mark">{r.hit ? "✓" : "×"}</span>
+                            <span className="score-name">{r.song}</span>
+                            <span className="score-prob">{pct1(r.prob)}</span>
+                          </div>
+                        ))}
+                      <Pager
+                        page={shortlistPage}
+                        totalRows={shownTake.rows.length}
+                        pageSize={shortlistPageRows}
+                        onPage={setShortlistPage}
+                      />
+                    </div>
                   </div>
                 </div>
               </>

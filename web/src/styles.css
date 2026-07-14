@@ -1042,13 +1042,14 @@ a:hover {
   border-radius: 4px;
   padding: 4px 8px;
 }
-/* "Predicted by nobody" chips — accent + dashed border + a leading × so they
-   read as a distinct category without relying on color alone. */
+/* "Predicted by nobody" chips — grey + dashed border + a leading × so they
+   read as a distinct (but non-alarming) category without relying on the
+   accent hue, which is reserved for model-hit chips below. */
 .played-chip.miss {
-  color: var(--accent);
-  border-color: var(--accent-a55);
+  color: var(--text-muted);
+  border-color: var(--border-input);
   border-style: dashed;
-  background: var(--accent-a18);
+  background: transparent;
 }
 /* Chips the selected model's shortlist called — solid accent + leading ✓,
    distinct from the dashed missed-by-all treatment without a second hue. */
@@ -1238,10 +1239,10 @@ a:hover {
 }
 .standings-grid {
   display: grid;
-  /* Model | Kind | Shows | Hit·20 | Recall | Brier | List | vs heur |
-     Setlist | Placed | Sharp | Refresh gain */
+  /* Model | Kind | Setlist | Placed | Shows | Hit·20 | Recall | Brier |
+     List | vs heur | Sharp | Refresh gain */
   grid-template-columns:
-    1.3fr 0.85fr 0.55fr 0.7fr 0.7fr 0.6fr 0.55fr 0.75fr 0.7fr 0.7fr 0.55fr 1.1fr;
+    1.3fr 0.85fr 0.6fr 0.55fr 0.55fr 0.7fr 0.7fr 0.75fr 0.7fr 0.7fr 0.55fr 1.1fr;
   gap: 8px;
   align-items: center;
   min-width: 1040px;
@@ -1313,6 +1314,54 @@ a:hover {
 .standings-th:focus-visible {
   outline: none;
   color: var(--accent);
+}
+
+/* --- Tours page: compact model standings panel (repurposes the header band
+   that used to hold the "Tours" title / MODEL label, DEPLOY-CONTRACTS §8) --
+   a toggle-able summary of the same scoreboard the Shows page's Past
+   scorecards table renders in full, plus a link there. ------------------- */
+.standings-panel {
+  margin-bottom: 18px;
+}
+.standings-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.standings-panel-list {
+  display: flex;
+  flex-direction: column;
+}
+.standings-panel-row {
+  display: grid;
+  grid-template-columns: 1.3fr 0.7fr 0.6fr;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border-row);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.standings-panel-row:last-child {
+  border-bottom: none;
+}
+.standings-panel-row .standings-dim {
+  text-align: right;
+  font-size: 11px;
+}
+.standings-panel-cta {
+  margin-top: 12px;
+}
+@media (max-width: 640px) {
+  .standings-panel-head {
+    align-items: stretch;
+  }
+  .standings-panel-head .mode-toggle {
+    align-self: flex-start;
+  }
 }
 
 /* --- About -------------------------------------------------------------- */
@@ -1614,38 +1663,3 @@ a:hover {
   }
 }
 
-/* --- Tours "So far" tracker column (frozen predictions + actual plays this
-   tour, DEPLOY-CONTRACTS §3). Appended: adds a 6th track to the tour grid and
-   styles the per-song play-count cell. --------------------------------------- */
-.tour-grid-head,
-.tour-grid-row {
-  grid-template-columns:
-    minmax(150px, 2.2fr) minmax(100px, 1fr) minmax(64px, 0.8fr)
-    minmax(96px, 0.9fr) minmax(104px, 1fr) minmax(52px, 0.55fr);
-}
-.r-sofar {
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-family: var(--font-mono);
-  text-align: center;
-  justify-self: center;
-}
-/* 0 plays: dim em-dash; >=1: emphasized like the P(≥1) accent column. */
-.r-sofar.zero {
-  color: var(--text-tertiary);
-}
-.r-sofar.played {
-  color: var(--text-primary);
-  font-weight: 700;
-}
-/* Mobile: same collapse as P(≥1)/Dist — drop "So far" and keep the 3-col grid. */
-@media (max-width: 640px) {
-  .tour-grid-head .th-sofar,
-  .tour-grid-row .r-sofar {
-    display: none;
-  }
-  .tour-grid-head,
-  .tour-grid-row {
-    grid-template-columns: minmax(0, 1fr) 60px 92px;
-  }
-}

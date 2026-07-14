@@ -6,12 +6,14 @@ import { monthLabel, pct1 } from "../lib/format";
 import { songPageSize } from "../lib/paging";
 import Pager from "./Pager";
 import StatPopover from "./StatPopover";
+import ModelStandingsPanel from "./ModelStandingsPanel";
 
 interface ToursScreenProps {
   meta: Meta;
   schedule: Schedule;
   tour: TourReport;
   onGotoShow: (date: string) => void;
+  onOpenScorecards: () => void;
 }
 
 const SHORT_MONTHS = [
@@ -59,6 +61,7 @@ export default function ToursScreen({
   schedule,
   tour,
   onGotoShow,
+  onOpenScorecards,
 }: ToursScreenProps) {
   const [tourId, setTourId] = useState<string>(
     meta.tours.find((t) => t.has_data)?.id ?? "all",
@@ -89,8 +92,13 @@ export default function ToursScreen({
   const options = [
     ...meta.tours.map((t) => {
       const tourShows = schedule.shows.filter((s) => s.tour_id === t.id);
+      // `schedule.shows` is future-only, so once a tour is underway it
+      // undercounts the tour's total dates — prefer the tracker's
+      // n_shows_total (played + remaining) for the currently-loaded tour.
+      const totalShows =
+        t.id === tourId && tourData.tracker ? tourData.tracker.n_shows_total : tourShows.length;
       const subLabel = t.has_data
-        ? `${tourShows.length} shows · ${shortDate(tourShows[0].showdate)} – ${shortDate(
+        ? `${totalShows} shows · ${shortDate(tourShows[0].showdate)} – ${shortDate(
             tourShows[tourShows.length - 1].showdate,
           )}`
         : PLACEHOLDER_SUBLABEL[t.id] ?? "dates not yet announced";
@@ -134,6 +142,8 @@ export default function ToursScreen({
 
   return (
     <>
+      <ModelStandingsPanel onOpenScorecards={onOpenScorecards} />
+
       {/* No model label here (yet): tour tables are heuristic-only until
           per-model tour predictions are wired up — see
           docs/llm-auto-predictor-plan.md "Per-model tour predictions". */}
@@ -177,9 +187,6 @@ export default function ToursScreen({
                     ? distBuckets(tourData.rows[0].dist).join("/")
                     : "0/1/2/3/4+"}
                 </span>
-                <span className="th-sofar" style={{ textAlign: "center" }}>
-                  So far
-                </span>
               </div>
               {tourData.rows
                 .slice(songPage * songPageRows, (songPage + 1) * songPageRows)
@@ -190,10 +197,11 @@ export default function ToursScreen({
                     .map((k) => Math.round(r.dist[k] * 100))
                     .join("/") + "%";
                 const ml = mostLikelyPlays(r.dist);
-                // "So far" — actual plays of this song on the tour to date, from
-                // the frozen doc's tracker (per-tour docs only; the all-future
-                // "all" pill has none). 0 renders as a dim em-dash.
+                // Actual plays of this song on the tour to date, from the frozen
+                // doc's tracker (per-tour docs only; the all-future "all" pill
+                // has none) — surfaced in the bucket-chip popover, hidden if 0.
                 const soFar = tourData.tracker?.played_counts[r.slug] ?? 0;
+                const soFarDates = tourData.tracker?.played_dates?.[r.slug] ?? [];
                 return (
                   <div className="tour-grid-row" key={r.slug}>
                     <span className="r-song">{r.song}</span>
@@ -228,11 +236,14 @@ export default function ToursScreen({
                           </li>
                         ))}
                       </ul>
+                      {soFar > 0 && (
+                        <div className="stat-pop-line" style={{ marginTop: 8 }}>
+                          Plays so far this tour: <strong>{soFar}</strong> (
+                          {soFarDates.map(shortDate).join(", ")})
+                        </div>
+                      )}
                     </StatPopover>
                     <span className="r-dist">{dist}</span>
-                    <span className={"r-sofar" + (soFar > 0 ? " played" : " zero")}>
-                      {soFar > 0 ? soFar : "—"}
-                    </span>
                   </div>
                 );
                 })}
