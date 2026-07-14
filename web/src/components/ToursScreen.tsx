@@ -6,12 +6,14 @@ import { monthLabel, pct1 } from "../lib/format";
 import { songPageSize } from "../lib/paging";
 import Pager from "./Pager";
 import StatPopover from "./StatPopover";
+import ModelStandingsPanel from "./ModelStandingsPanel";
 
 interface ToursScreenProps {
   meta: Meta;
   schedule: Schedule;
   tour: TourReport;
   onGotoShow: (date: string) => void;
+  onOpenScorecards: () => void;
 }
 
 const SHORT_MONTHS = [
@@ -59,6 +61,7 @@ export default function ToursScreen({
   schedule,
   tour,
   onGotoShow,
+  onOpenScorecards,
 }: ToursScreenProps) {
   const [tourId, setTourId] = useState<string>(
     meta.tours.find((t) => t.has_data)?.id ?? "all",
@@ -139,6 +142,8 @@ export default function ToursScreen({
 
   return (
     <>
+      <ModelStandingsPanel onOpenScorecards={onOpenScorecards} />
+
       {/* No model label here (yet): tour tables are heuristic-only until
           per-model tour predictions are wired up — see
           docs/llm-auto-predictor-plan.md "Per-model tour predictions". */}

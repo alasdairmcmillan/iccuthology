@@ -28,6 +28,11 @@ interface ShowsScreenProps {
   setlistsByDate: Record<string, SetlistPrediction | null>;
   selectedShows: string[];
   onChangeSelected: (next: string[]) => void;
+  /** Which mode to mount in — e.g. the Tours page's standings panel links
+   *  straight to "past" scorecards. Only read once, on mount (this screen
+   *  fully unmounts/remounts on every screen switch, so a plain initial
+   *  value is enough — no need to react to prop changes after that). */
+  initialMode?: "upcoming" | "past";
 }
 
 interface ModelOption {
@@ -229,6 +234,7 @@ export default function ShowsScreen({
   setlistsByDate,
   selectedShows,
   onChangeSelected,
+  initialMode,
 }: ShowsScreenProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [setlistNight, setSetlistNight] = useState<string | null>(null);
@@ -241,7 +247,7 @@ export default function ShowsScreen({
   // Past-scorecard mode (DEPLOY-CONTRACTS §8). Default view stays FUTURE
   // predictions; the scoreboard is lazy-fetched on the first toggle and cached
   // in this component's state so switching back and forth is instant.
-  const [mode, setMode] = useState<"upcoming" | "past">("upcoming");
+  const [mode, setMode] = useState<"upcoming" | "past">(initialMode ?? "upcoming");
   const [scoreboard, setScoreboard] = useState<Scoreboard | null>(null);
   const [scoreboardError, setScoreboardError] = useState<string | null>(null);
   const [pastDate, setPastDate] = useState<string | null>(null);

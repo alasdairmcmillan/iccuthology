@@ -1316,6 +1316,54 @@ a:hover {
   color: var(--accent);
 }
 
+/* --- Tours page: compact model standings panel (repurposes the header band
+   that used to hold the "Tours" title / MODEL label, DEPLOY-CONTRACTS §8) --
+   a toggle-able summary of the same scoreboard the Shows page's Past
+   scorecards table renders in full, plus a link there. ------------------- */
+.standings-panel {
+  margin-bottom: 18px;
+}
+.standings-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.standings-panel-list {
+  display: flex;
+  flex-direction: column;
+}
+.standings-panel-row {
+  display: grid;
+  grid-template-columns: 1.3fr 0.7fr 0.6fr;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border-row);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.standings-panel-row:last-child {
+  border-bottom: none;
+}
+.standings-panel-row .standings-dim {
+  text-align: right;
+  font-size: 11px;
+}
+.standings-panel-cta {
+  margin-top: 12px;
+}
+@media (max-width: 640px) {
+  .standings-panel-head {
+    align-items: stretch;
+  }
+  .standings-panel-head .mode-toggle {
+    align-self: flex-start;
+  }
+}
+
 /* --- About -------------------------------------------------------------- */
 .about {
   max-width: 680px;

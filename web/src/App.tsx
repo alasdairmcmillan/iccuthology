@@ -49,6 +49,10 @@ export default function App() {
   >({});
   const [selectedShows, setSelectedShows] = useState<string[]>([]);
   const [offline, setOffline] = useState(false);
+  // Which mode ShowsScreen should mount in — flipped to "past" by the Tours
+  // page's standings panel, reset to "upcoming" by any specific-show jump so
+  // a later scorecards visit doesn't leak into an unrelated show lookup.
+  const [showsInitialMode, setShowsInitialMode] = useState<"upcoming" | "past">("upcoming");
 
   // Initial load: meta, schedule, tour, then every data-having show + its setlist.
   useEffect(() => {
@@ -131,6 +135,12 @@ export default function App() {
 
   const gotoShow = (date: string) => {
     setSelectedShows([date]);
+    setShowsInitialMode("upcoming");
+    setScreen("shows");
+  };
+
+  const gotoPastScorecards = () => {
+    setShowsInitialMode("past");
     setScreen("shows");
   };
 
@@ -147,6 +157,7 @@ export default function App() {
             schedule={schedule}
             tour={tour}
             onGotoShow={gotoShow}
+            onOpenScorecards={gotoPastScorecards}
           />
         )}
         {loaded && screen === "shows" && (
@@ -157,6 +168,7 @@ export default function App() {
             setlistsByDate={setlistsByDate}
             selectedShows={selectedShows}
             onChangeSelected={setSelectedShows}
+            initialMode={showsInitialMode}
           />
         )}
         {loaded && screen === "personal" && <PersonalScreen schedule={schedule} />}
