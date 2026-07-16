@@ -20,6 +20,14 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/** Display name for a model/source key: hide the "mcp:" transport prefix
+ *  ("mcp:claude-fable" -> "claude-fable"). Keys keep the prefix everywhere in
+ *  data and lookups — this is presentation only; the mcp kind still shows via
+ *  the adjacent kind label/tag wherever names are stripped. */
+export function modelDisplayName(key: string): string {
+  return key.replace(/^mcp:/, "");
+}
+
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",

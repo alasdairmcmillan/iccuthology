@@ -142,8 +142,6 @@ export default function ToursScreen({
 
   return (
     <>
-      <ModelStandingsPanel onOpenScorecards={onOpenScorecards} />
-
       {/* No model label here (yet): tour tables are heuristic-only until
           per-model tour predictions are wired up — see
           docs/llm-auto-predictor-plan.md "Per-model tour predictions". */}
@@ -164,13 +162,16 @@ export default function ToursScreen({
         ))}
       </div>
 
-      {!selected.hasData ? (
-        <div className="no-data-card">
-          No cached predictions for this tour yet — dates aren't finalized. Check back
-          once they're announced.
-        </div>
-      ) : (
-        <div className="tours-row">
+      {/* The standings panel lives in the sidebar even for no-data tours, so
+          the leaderboard never disappears when browsing unannounced tours —
+          only the table/schedule react to the selected pill. */}
+      <div className="tours-row">
+        {!selected.hasData ? (
+          <div className="no-data-card tour-table-card">
+            No cached predictions for this tour yet — dates aren't finalized. Check back
+            once they're announced.
+          </div>
+        ) : (
           <div className="card tour-table-card">
             <div className="tour-scroll">
               <div className="tour-grid-head">
@@ -271,8 +272,11 @@ export default function ToursScreen({
               )}
             </div>
           </div>
+        )}
 
-          <div className="tour-side">
+        <div className="tour-side">
+          <ModelStandingsPanel onOpenScorecards={onOpenScorecards} />
+          {scheduleForTour.length > 0 && (
             <div className="card" style={{ padding: "18px 20px" }}>
               <div style={{ color: "var(--text-primary)", fontSize: 13, fontWeight: 700 }}>
                 {selected.label}
@@ -323,9 +327,9 @@ export default function ToursScreen({
                 </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
     </>
   );
 }

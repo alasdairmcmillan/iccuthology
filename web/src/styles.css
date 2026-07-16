@@ -1234,34 +1234,41 @@ a:hover {
 .standings-card {
   margin-bottom: 24px;
 }
-.standings-scroll {
-  overflow-x: auto;
+/* Sort-chip row — one chip per rankable metric; the active chip takes the
+   accent plus a direction caret. Each chip is also a StatPopover trigger, so
+   the old column-header tooltips survive the card redesign (hover/tap shows
+   the metric definition; click sorts and harmlessly toggles the tip). */
+.standings-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 14px 0;
 }
-.standings-grid {
-  display: grid;
-  /* Model | Kind | Setlist | Placed | Shows | Hit·20 | Recall | Brier |
-     List | vs heur | Sharp | Refresh gain */
-  grid-template-columns:
-    1.3fr 0.85fr 0.6fr 0.55fr 0.55fr 0.7fr 0.7fr 0.75fr 0.7fr 0.7fr 0.55fr 1.1fr;
-  gap: 8px;
-  align-items: center;
-  min-width: 1040px;
-}
-.standings-head {
-  padding: 0 10px 8px;
-  color: var(--text-secondary);
-  font-size: 9px;
+.standings-chip {
+  cursor: pointer;
+  background: var(--input-bg);
+  border: 1px solid var(--border-input);
+  color: var(--text-label);
+  font-family: var(--font-mono);
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-family: var(--font-mono);
-  border-bottom: 1px solid var(--border-card);
+  letter-spacing: 0.04em;
+  padding: 5px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
-.standings-row {
-  padding: 9px 10px;
-  border-bottom: 1px solid var(--border-row);
-  font-family: var(--font-mono);
-  font-size: 12px;
+.standings-chip:hover {
+  color: var(--text-primary);
+}
+.standings-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.standings-chip:focus-visible {
+  outline: none;
+  border-color: var(--accent);
 }
 .standings-model {
   color: var(--text-primary);
@@ -1286,50 +1293,136 @@ a:hover {
 .standings-delta.neg {
   color: var(--neg);
 }
-/* Click-to-sort column header — a borderless button that inherits the head
-   row's mono/label styling. The active column takes the accent + a caret. */
-.standings-head .th-sort {
-  justify-self: end;
+/* Expandable model cards — the mobile-friendly standings detail view. Head
+   row: rank / name+kind / headline (active metric) / chevron; expanding
+   reveals the full metric breakdown as a reflowing grid. */
+.standings-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
-.standings-th {
+.mcard {
+  background: var(--bg-page);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-md);
+}
+.mcard.open {
+  border-color: var(--border-input);
+}
+.mcard-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
   appearance: none;
   background: none;
   border: none;
-  margin: 0;
-  padding: 0;
   cursor: pointer;
+  padding: 12px 16px;
+  text-align: left;
+  font-family: var(--font-mono);
   color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  text-align: right;
 }
-.standings-th:hover {
+.mcard-rank {
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 800;
+  width: 22px;
+  flex-shrink: 0;
+}
+.mcard-rank.lead {
+  color: var(--accent);
+}
+.mcard-id {
+  flex: 1;
+  min-width: 110px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mcard-name {
   color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
-.standings-th[aria-sort="ascending"],
-.standings-th[aria-sort="descending"] {
-  color: var(--accent);
+.mcard-kind {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
-.standings-th:focus-visible {
-  outline: none;
-  color: var(--accent);
+.mcard-headline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-left: auto;
+}
+.mcard-headline-val {
+  font-size: 17px;
+}
+.mcard-headline-label {
+  color: var(--text-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mcard-chev {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.mcard-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px 14px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border-row);
+}
+.mcard-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mcard-metric .tip-label {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mcard-metric-val {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  text-align: left;
+}
+/* ◆ best-in-field — gold, matching the exact-slot tier elsewhere. */
+.best-mark {
+  color: var(--gold);
+}
+.standings-legend {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  margin-top: 12px;
 }
 
-/* --- Tours page: compact model standings panel (repurposes the header band
-   that used to hold the "Tours" title / MODEL label, DEPLOY-CONTRACTS §8) --
-   a toggle-able summary of the same scoreboard the Shows page's Past
-   scorecards table renders in full, plus a link there. ------------------- */
+/* --- Tours page: compact model standings panel — lives in the .tour-side
+   sidebar above the schedule card (DEPLOY-CONTRACTS §8). A toggle-able
+   summary of the same scoreboard the Shows page's Past scorecards board
+   renders in full, plus a link there. ------------------------------------ */
 .standings-panel {
-  margin-bottom: 18px;
+  padding: 16px 18px;
 }
 .standings-panel-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 14px;
+  margin-bottom: 6px;
 }
 .standings-panel-list {
   display: flex;
@@ -1337,10 +1430,10 @@ a:hover {
 }
 .standings-panel-row {
   display: grid;
-  grid-template-columns: 1.3fr 0.7fr 0.6fr;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  padding: 8px 2px;
+  padding: 7px 0;
   border-bottom: 1px solid var(--border-row);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -1348,20 +1441,63 @@ a:hover {
 .standings-panel-row:last-child {
   border-bottom: none;
 }
-.standings-panel-row .standings-dim {
-  text-align: right;
+.standings-panel-row .standings-model {
+  display: block;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.standings-rank {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+.standings-rank.lead {
+  color: var(--accent);
+}
+.standings-panel-id {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.standings-sub {
+  color: var(--text-tertiary);
+  font-size: 9px;
+  font-family: var(--font-mono);
+}
+.standings-panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+.standings-link {
+  appearance: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
   font-size: 11px;
 }
-.standings-panel-cta {
-  margin-top: 12px;
+.standings-link:hover,
+.standings-link:focus-visible {
+  color: var(--accent);
+  outline: none;
 }
-@media (max-width: 640px) {
-  .standings-panel-head {
-    align-items: stretch;
-  }
-  .standings-panel-head .mode-toggle {
-    align-self: flex-start;
-  }
+/* Smaller segmented toggle for tight sidebar headers. */
+.mode-toggle-sm {
+  padding: 2px;
+  gap: 2px;
+}
+.mode-toggle-sm .mode-option {
+  font-size: 9px;
+  padding: 3px 9px;
+  text-transform: uppercase;
 }
 
 /* --- About -------------------------------------------------------------- */

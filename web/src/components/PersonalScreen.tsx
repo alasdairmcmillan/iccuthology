@@ -35,6 +35,9 @@ interface PersonalRow {
   song: string;
   slug: string;
   plays: number;
+  /** Plays on or after the user's first attended show (from catalog.by_show)
+   *  — the IHOZ-style "you had your chances" axis. */
+  playsSince: number;
   last: string | null;
   pSee: number;
   modalDate: string | null;
@@ -45,12 +48,19 @@ interface PersonalReport {
   nDatesGiven: number;
   nMatched: number;
   nSeenSongs: number;
+  firstShow: string;
   horizonStart: string;
   horizonEnd: string;
   nHorizon: number;
   nSims: number;
+  /** All unseen candidates (career plays >= MIN_PLAYS), unranked — the
+   *  active toggle sorts and slices to TOP at render. */
   rows: PersonalRow[];
 }
+
+/** Rank unseen songs by all-time plays, or by plays since the user's first
+ *  show — how many times they've "missed" it while a fan. */
+type PlaysMode = "since" | "alltime";
 
 /** Dates from pasted text: phish.net seedfile M/D/YY(YY) lines or ISO dates. */
 function parsePastedDates(text: string): string[] {
@@ -79,6 +89,7 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<PersonalReport | null>(null);
+  const [playsMode, setPlaysMode] = useState<PlaysMode>("since");
   const [page, setPage] = useState(0);
   const [pageRows] = useState(songPageSize);
 
@@ -116,6 +127,15 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
       for (const d of matched) {
         for (const sid of catalog.by_show[d]) seen.add(sid);
       }
+      const firstShow = matched.reduce((a, b) => (b < a ? b : a));
+
+      // Per-song plays since the first attended show, tallied from the
+      // published show history (by_show covers every past show).
+      const sinceCounts = new Map<number, number>();
+      for (const [d, sids] of Object.entries(catalog.by_show)) {
+        if (d < firstShow) continue;
+        for (const sid of sids) sinceCounts.set(sid, (sinceCounts.get(sid) ?? 0) + 1);
+      }
 
       // Reduce the published simulation once, then join vocab index -> songid.
       const horizonDates = samples.meta.horizon_showdates;
@@ -126,6 +146,8 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
         if (odds) oddsBySongid.set(v.songid, odds);
       }
 
+      // Collect EVERY candidate (not just the first TOP): the two ranking
+      // modes order them differently, so the slice happens at render.
       const rows: PersonalRow[] = [];
       for (const s of catalog.songs) {
         if (seen.has(s.songid) || s.plays < MIN_PLAYS) continue;
@@ -135,12 +157,12 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
           song: s.name,
           slug: s.slug,
           plays: s.plays,
+          playsSince: sinceCounts.get(s.songid) ?? 0,
           last: s.last,
           pSee: odds?.pSee ?? 0,
           modalDate: odds?.modalDate ?? null,
           modalProb: odds?.modalProb ?? 0,
         });
-        if (rows.length >= TOP) break;
       }
 
       setPage(0);
@@ -148,6 +170,7 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
         nDatesGiven: dates.length,
         nMatched: matched.length,
         nSeenSongs: seen.size,
+        firstShow,
         horizonStart: horizonDates[0] ?? "?",
         horizonEnd: horizonDates[horizonDates.length - 1] ?? "?",
         nHorizon: horizonDates.length,
@@ -163,6 +186,18 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
   };
 
   const canLoad = !loading && ((pasteOpen && pasted.trim().length > 0) || username.trim().length > 0);
+
+  // Candidates ranked per the active toggle. catalog.songs order IS the
+  // all-time ranking (plays desc), so only "since" needs a re-sort; career
+  // plays break ties so stable-but-rare songs don't shuffle randomly.
+  const rankedRows = useMemo(() => {
+    if (!report) return [];
+    const rows =
+      playsMode === "since"
+        ? [...report.rows].sort((a, b) => b.playsSince - a.playsSince || b.plays - a.plays)
+        : report.rows;
+    return rows.slice(0, TOP);
+  }, [report, playsMode]);
 
   return (
     <div className="personal-layout">
@@ -215,11 +250,49 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
 
       {report && (
         <div className="card">
-          <div className="card-title">Your lookahead</div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <div className="card-title">Your lookahead</div>
+            {/* IHOZ-style ranking axis: how often it's played all-time, or how
+                often it's played SINCE your first show — i.e. how many chances
+                you've already blown. Defaults to since-first-show. */}
+            <div className="mode-toggle mode-toggle-sm" role="tablist" aria-label="Plays ranking">
+              <button
+                className={"mode-option" + (playsMode === "since" ? " active" : "")}
+                role="tab"
+                aria-selected={playsMode === "since"}
+                onClick={() => {
+                  setPlaysMode("since");
+                  setPage(0);
+                }}
+              >
+                Since first show
+              </button>
+              <button
+                className={"mode-option" + (playsMode === "alltime" ? " active" : "")}
+                role="tab"
+                aria-selected={playsMode === "alltime"}
+                onClick={() => {
+                  setPlaysMode("alltime");
+                  setPage(0);
+                }}
+              >
+                All-time
+              </button>
+            </div>
+          </div>
           <div className="card-sub mono" style={{ marginTop: 4 }}>
             {report.nMatched} of {report.nDatesGiven} shows matched the published history ·{" "}
-            {report.nSeenSongs} distinct songs seen · horizon {report.horizonStart} …{" "}
-            {report.horizonEnd} ({report.nHorizon} shows, {report.nSims} sims)
+            first show {report.firstShow} · {report.nSeenSongs} distinct songs seen · horizon{" "}
+            {report.horizonStart} … {report.horizonEnd} ({report.nHorizon} shows,{" "}
+            {report.nSims} sims)
           </div>
           <div className="personal-grid personal-grid-head">
             <span>Song</span>
@@ -227,10 +300,16 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
             <span style={{ textAlign: "right" }}>P(finally see it)</span>
             <span style={{ textAlign: "right" }}>Most likely show</span>
           </div>
-          {report.rows.slice(page * pageRows, (page + 1) * pageRows).map((r) => (
+          {rankedRows.slice(page * pageRows, (page + 1) * pageRows).map((r) => (
             <div className="personal-grid personal-grid-row" key={r.songid}>
               <span className="r-song">
-                {r.song} <span className="personal-plays-inline">({r.plays})</span>
+                {r.song}{" "}
+                <span
+                  className="personal-plays-inline"
+                  title={`${r.plays} plays all-time · ${r.playsSince} since your first show`}
+                >
+                  ({playsMode === "since" ? r.playsSince : r.plays})
+                </span>
               </span>
               <span className="mono personal-dim">{r.last ?? "-"}</span>
               <span className="run-p">{(r.pSee * 100).toFixed(1)}%</span>
@@ -246,11 +325,11 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
           ))}
           <Pager
             page={page}
-            totalRows={report.rows.length}
+            totalRows={rankedRows.length}
             pageSize={pageRows}
             onPage={setPage}
           />
-          {report.rows.length === 0 && (
+          {rankedRows.length === 0 && (
             <div className="center-msg">
               Nothing left to chase — you've seen every commonly played song. Go see a
               Fishman-on-vacuum encore for the rest of us.
@@ -260,7 +339,9 @@ export default function PersonalScreen({ schedule }: PersonalScreenProps) {
             P(finally see it) = odds the song is played at least once across the whole
             horizon; most likely show = the night most often FIRST to play it in the
             published simulation. Seen-songs are derived from your attended dates and the
-            published show history — dates that don't match a Phish show are ignored.
+            published show history — dates that don't match a Phish show are ignored. The
+            count after each song is its play total on the selected axis: shows since
+            your first show, or all-time.
           </div>
         </div>
       )}

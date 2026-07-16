@@ -10,15 +10,23 @@ import type {
   ScorecardSetlistMarquee,
   ScorecardSetlistScore,
   Scoreboard,
-  ScoreboardModel,
   Scorecard,
   ScorecardSource,
   SetlistPrediction,
   ShowReport,
 } from "../types";
-import { dateLabel, dateLabelDay, dateLabelShort, pct, pct1 } from "../lib/format";
+import {
+  dateLabel,
+  dateLabelDay,
+  dateLabelShort,
+  modelDisplayName,
+  pct,
+  pct1,
+} from "../lib/format";
+import { METRIC_TIPS, formatSignedPct, hitRateTip } from "../lib/metricTips";
 import { songPageSize } from "../lib/paging";
 import Pager from "./Pager";
+import StandingsBoard from "./StandingsBoard";
 import StatPopover from "./StatPopover";
 
 interface ShowsScreenProps {
@@ -68,7 +76,8 @@ function deriveModelOptions(
   ordered.push(...extras);
   return ordered.map((id) => {
     const kind = kindByKey.get(id);
-    return { id, label: kind && kind !== "statistical" ? `${id} (${kind})` : id };
+    const name = modelDisplayName(id);
+    return { id, label: kind && kind !== "statistical" ? `${name} (${kind})` : name };
   });
 }
 
@@ -124,39 +133,8 @@ function marqueeBadgeLabels(marquee: ScorecardSetlistMarquee): string[] {
     .map(([key]) => MARQUEE_LABELS[key] ?? `Called the ${key.replace(/_/g, " ")}`);
 }
 
-/** 0.15 -> "+15%", -0.05 -> "-5%" — signed whole-percent for the refresh-gain delta. */
-function formatSignedPct(x: number): string {
-  return (x >= 0 ? "+" : "") + pct(x);
-}
-
-// Centralized metric-definition copy, reused by the scores-band metric labels
-// and the standings column headers (§8). "top N" renders from metrics.top_n
-// via hitRateTip() where a card knows its window; the scoreboard carries no
-// per-model top_n so its Hit column tip uses the current 20.
-const METRIC_TIPS = {
-  recall:
-    "Of the songs actually played, the share that appeared anywhere in the model's full shortlist. Longer shortlists (20–40 allowed) make this easier — read it next to the list length.",
-  brier:
-    "Mean squared error between each shortlist probability and the outcome (1 = played, 0 = not). Rewards calibration: a confident miss costs far more than a hedged one. 0 is perfect; always guessing 50% scores 0.25.",
-  vsHeuristic:
-    "This model's top-20 hit rate minus the statistical baseline's on the same shows — positive means it beat the baseline.",
-  list: "Average shortlist length submitted (20–40 allowed). Context for recall: longer lists cover more.",
-  setlistWeighted:
-    "Each called song: 1 point for playing at all, +1 for the right set, +1 for the exact slot. 100% = every called song in its exact slot.",
-  setlistHitRate: "Share of songs in the called setlist that played anywhere in the show.",
-  placedRate: "Of the called songs that played, the share the model put in the correct set.",
-  exactCalls: "Right song, right set, right slot.",
-  refreshGain:
-    "Mean change in top-20 hit rate from a model's first take to its final take, over shows with multiple takes.",
-  shows: "Scored shows this model has a frozen, scored take for.",
-  sharp: "Shows where the model landed 2+ exact calls (right song, right set, right slot).",
-} as const;
-
-function hitRateTip(topN: number): string {
-  return `Of the model's ${topN} highest-probability songs, the share that actually played — anywhere in the show, any set. With ~18 songs in a typical show, a perfect 20-song list tops out near 90%.`;
-}
-
 // A metric/column label that reveals its definition on hover/tap (StatPopover).
+// Definition copy lives in lib/metricTips.ts, shared with StandingsBoard.
 function TipLabel({
   text,
   tip,
@@ -174,45 +152,6 @@ function TipLabel({
       <div className="stat-pop-line">{tip}</div>
     </StatPopover>
   );
-}
-
-// Sortable standings columns (numeric only — Model/Kind are not sortable).
-type SortCol =
-  | "n_shows"
-  | "hit_rate_top20"
-  | "recall"
-  | "brier"
-  | "avg_n_rows"
-  | "vs_heuristic"
-  | "setlist_hit_rate"
-  | "placed_rate"
-  | "sharpshooters"
-  | "refresh_gain";
-
-// Numeric sort key for a model row; null (missing metric) always sorts last.
-function standingsSortValue(m: ScoreboardModel, col: SortCol): number | null {
-  switch (col) {
-    case "n_shows":
-      return m.n_shows;
-    case "hit_rate_top20":
-      return m.hit_rate_top20;
-    case "recall":
-      return m.recall;
-    case "brier":
-      return m.brier;
-    case "avg_n_rows":
-      return m.avg_n_rows;
-    case "vs_heuristic":
-      return m.vs_heuristic ? m.vs_heuristic.hit_rate_top20_delta : null;
-    case "setlist_hit_rate":
-      return m.setlist ? m.setlist.hit_rate : null;
-    case "placed_rate":
-      return m.setlist ? m.setlist.placed_rate : null;
-    case "sharpshooters":
-      return m.setlist ? m.setlist.sharpshooters : null;
-    case "refresh_gain":
-      return m.refresh_gain ? m.refresh_gain.mean_hit_rate_top20_delta : null;
-  }
 }
 
 // One "take" of a scorecard source's own metrics/rows/setlist call — either
@@ -257,9 +196,6 @@ export default function ShowsScreen({
   // Which take of the active source is shown — "final" (the top-level,
   // official-benchmark entry) or a prior version's index (§8 versioning).
   const [versionSel, setVersionSel] = useState<number | "final">("final");
-  // Standings sort — numeric columns only; default setlist hit rate desc.
-  const [sortCol, setSortCol] = useState<SortCol>("setlist_hit_rate");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   // Pager for the (30–40 row) frozen shortlist in past mode — fixed at 20
   // rather than the shared dynamic songPageSize(): this list is a probability
   // ranking, and 20 lines up with the standard top-20 hit-rate window.
@@ -453,56 +389,6 @@ export default function ShowsScreen({
         {s.song}
       </span>
     );
-
-  // Standings sorted by the selected column; nulls last, direction toggled.
-  const sortedModels = useMemo(() => {
-    if (!scoreboard) return [];
-    const entries = Object.entries(scoreboard.models);
-    const sign = sortDir === "asc" ? 1 : -1;
-    return entries.sort(([, a], [, b]) => {
-      const va = standingsSortValue(a, sortCol);
-      const vb = standingsSortValue(b, sortCol);
-      if (va === null && vb === null) return 0;
-      if (va === null) return 1; // missing always last
-      if (vb === null) return -1;
-      return (va - vb) * sign;
-    });
-  }, [scoreboard, sortCol, sortDir]);
-
-  const onSort = (col: SortCol) => {
-    if (col === sortCol) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortCol(col);
-      setSortDir("desc");
-    }
-  };
-  const ariaSort = (col: SortCol): "ascending" | "descending" | "none" =>
-    col === sortCol ? (sortDir === "asc" ? "ascending" : "descending") : "none";
-  const sortCaret = (col: SortCol): string =>
-    col === sortCol ? (sortDir === "asc" ? " ▲" : " ▼") : "";
-
-  // A right-aligned, click-to-sort standings header whose label reveals its
-  // definition on hover/tap (StatPopover). The button is the popover trigger,
-  // so a click both sorts and (harmlessly) toggles the tip.
-  const sortHeader = (col: SortCol, label: string, tip: string) => (
-    <StatPopover
-      triggerClassName="th-sort"
-      trigger={
-        <button
-          type="button"
-          className="standings-th"
-          aria-sort={ariaSort(col)}
-          onClick={() => onSort(col)}
-        >
-          {label}
-          {sortCaret(col)}
-        </button>
-      }
-    >
-      <div className="stat-pop-line">{tip}</div>
-    </StatPopover>
-  );
 
   // Keep the setlist night valid (first data-having selected night).
   const activeNight =
@@ -786,81 +672,7 @@ export default function ShowsScreen({
         ) : (
           <>
             {Object.keys(scoreboard.models).length > 0 && (
-              <div className="card standings-card">
-                <span className="card-title">Model standings</span>
-                <div className="card-sub" style={{ marginTop: 4 }}>
-                  Unweighted means over scored shows (final takes only).
-                </div>
-                <div className="standings-scroll">
-                  <div className="standings-grid standings-head">
-                    <span>Model</span>
-                    <span>Kind</span>
-                    {sortHeader("setlist_hit_rate", "Setlist", METRIC_TIPS.setlistHitRate)}
-                    {sortHeader("placed_rate", "Placed", METRIC_TIPS.placedRate)}
-                    {sortHeader("n_shows", "Shows", METRIC_TIPS.shows)}
-                    {sortHeader("hit_rate_top20", "Hit·20", hitRateTip(20))}
-                    {sortHeader("recall", "Recall", METRIC_TIPS.recall)}
-                    {sortHeader("brier", "Brier", METRIC_TIPS.brier)}
-                    {sortHeader("avg_n_rows", "List", METRIC_TIPS.list)}
-                    {sortHeader("vs_heuristic", "vs heur", METRIC_TIPS.vsHeuristic)}
-                    {sortHeader("sharpshooters", "Sharp", METRIC_TIPS.sharp)}
-                    {sortHeader("refresh_gain", "Refresh gain", METRIC_TIPS.refreshGain)}
-                  </div>
-                  {sortedModels.map(([key, m]) => (
-                    <div className="standings-grid standings-row" key={key}>
-                      <span className="standings-model">{key}</span>
-                      <span className="standings-dim">{m.kind}</span>
-                      <span
-                        className={m.setlist ? "standings-val" : "standings-dim"}
-                        style={{ textAlign: "right" }}
-                      >
-                        {m.setlist ? pct1(m.setlist.hit_rate) : "—"}
-                      </span>
-                      <span
-                        className={m.setlist ? "standings-val" : "standings-dim"}
-                        style={{ textAlign: "right" }}
-                      >
-                        {m.setlist ? pct1(m.setlist.placed_rate) : "—"}
-                      </span>
-                      <span style={{ textAlign: "right" }}>{m.n_shows}</span>
-                      <span className="standings-val" style={{ textAlign: "right" }}>
-                        {pct1(m.hit_rate_top20)}
-                      </span>
-                      <span className="standings-val" style={{ textAlign: "right" }}>
-                        {pct1(m.recall)}
-                      </span>
-                      <span style={{ textAlign: "right" }}>{m.brier.toFixed(3)}</span>
-                      <span style={{ textAlign: "right" }}>{m.avg_n_rows.toFixed(1)}</span>
-                      {m.vs_heuristic ? (
-                        <span
-                          className={
-                            m.vs_heuristic.hit_rate_top20_delta >= 0
-                              ? "standings-delta pos"
-                              : "standings-delta neg"
-                          }
-                        >
-                          {formatSignedPct(m.vs_heuristic.hit_rate_top20_delta)}
-                        </span>
-                      ) : (
-                        <span className="standings-dim" style={{ textAlign: "right" }}>
-                          —
-                        </span>
-                      )}
-                      <span className="standings-dim" style={{ textAlign: "right" }}>
-                        {m.setlist ? m.setlist.sharpshooters : "—"}
-                      </span>
-                      <span
-                        className={m.refresh_gain ? "standings-val" : "standings-dim"}
-                        style={{ textAlign: "right" }}
-                      >
-                        {m.refresh_gain
-                          ? `${formatSignedPct(m.refresh_gain.mean_hit_rate_top20_delta)} after refresh`
-                          : "—"}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <StandingsBoard models={scoreboard.models} />
             )}
 
             <div className="setlist-controls" style={{ marginBottom: 24 }}>
@@ -888,8 +700,9 @@ export default function ShowsScreen({
                 >
                   {pastSourceKeys.map((key) => {
                     const src = activeScorecard!.sources[key];
+                    const name = modelDisplayName(key);
                     const label =
-                      src.kind !== "statistical" ? `${key} (${src.kind})` : key;
+                      src.kind !== "statistical" ? `${name} (${src.kind})` : name;
                     return (
                       <option key={key} value={key}>
                         {label}
@@ -914,7 +727,7 @@ export default function ShowsScreen({
                     grouped with small labels, plus the callouts. */}
                 <div className="card scores-band">
                   <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                    <span className="card-title">{activePastModel}</span>
+                    <span className="card-title">{modelDisplayName(activePastModel!)}</span>
                     <span className="label-caps">{activeSource.kind}</span>
                   </div>
                   <div className="card-sub" style={{ marginTop: 4 }}>
