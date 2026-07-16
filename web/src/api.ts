@@ -9,6 +9,7 @@
 // (offline dev, API downtime). Fixture-backed responses match the JSON shapes.
 import type {
   Catalog,
+  ChaserReport,
   Meta,
   RunReport,
   SamplesMeta,
@@ -199,6 +200,22 @@ export function fetchCatalog(): Promise<Catalog> {
     });
   }
   return catalogCache;
+}
+
+// GET /api/chaser/{slug} (DEPLOY-CONTRACTS §6). No fixture, same reasoning as
+// fetchCatalog/fetchSamples — cached per-slug so the Songs page can call this
+// once per visible song card without refetching on re-render.
+const chaserCache = new Map<string, Promise<ChaserReport>>();
+export function fetchChaser(slug: string): Promise<ChaserReport> {
+  let p = chaserCache.get(slug);
+  if (!p) {
+    p = liveJson<ChaserReport>(`/api/chaser/${encodeURIComponent(slug)}`);
+    chaserCache.set(slug, p);
+    p.catch(() => {
+      if (chaserCache.get(slug) === p) chaserCache.delete(slug);
+    });
+  }
+  return p;
 }
 
 export interface SamplesBundle {

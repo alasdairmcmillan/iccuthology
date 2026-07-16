@@ -486,6 +486,7 @@ def song_play_catalog(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """
     return conn.execute(
         "SELECT p.songid AS songid, so.slug AS slug, so.name AS name, "
+        "so.debut_date AS debut_date, "
         "COUNT(*) AS plays, MAX(sh.showdate) AS last_played "
         "FROM performances p JOIN songs so ON so.songid = p.songid "
         "JOIN shows sh ON sh.showid = p.showid AND sh.exclude = 0 "

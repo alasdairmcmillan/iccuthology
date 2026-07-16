@@ -118,6 +118,16 @@ a:hover {
   min-width: 0;
   max-width: 100%;
   overflow-x: auto;
+  /* Swipe-scroll stays available as a fallback for very narrow phones, but
+     the scrollbar chrome itself is hidden — some devices render a visible
+     scrollbar track even when the content only overflows by a few px and
+     nothing is actually cut off, which reads as "broken" rather than
+     intentional. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 .tab {
   cursor: pointer;
@@ -173,65 +183,59 @@ a:hover {
   max-height: 420px;
   overflow-y: auto;
 }
-.search-result {
-  padding: 9px 8px;
-  border-bottom: 1px solid #1a232b;
-}
-.search-result:last-child {
-  border-bottom: none;
-}
-.search-song {
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 5px;
-}
-.night-chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.night-chip {
-  cursor: pointer;
-  background: var(--input-bg);
-  border: 1px solid var(--border-card);
-  color: var(--text-label);
-  font-size: 10px;
-  font-family: var(--font-mono);
-  padding: 3px 7px;
-  border-radius: 4px;
-}
-.night-chip:hover {
-  border-color: var(--accent-a66);
-  color: var(--text-secondary);
-}
-.night-chip .pct {
-  color: var(--accent);
-}
-.tour-chip {
-  cursor: pointer;
-  background: var(--accent-a66, rgba(255, 255, 255, 0.08));
-  background: color-mix(in srgb, var(--accent) 14%, var(--input-bg));
-  border: 1px solid var(--accent-a66);
-  color: var(--accent);
-  font-size: 10px;
-  font-family: var(--font-mono);
-  padding: 3px 7px;
-  border-radius: 4px;
-}
-.tour-chip:hover {
-  border-color: var(--accent);
-  color: var(--text-primary);
-}
-.tour-chip-label {
-  color: var(--text-label);
-  margin-left: 2px;
-}
 .search-empty {
   color: var(--text-muted);
   font-size: 12px;
   padding: 6px 4px;
   font-family: var(--font-mono);
+}
+
+/* --- Song cards (header quick-search + Songs page) ----------------------- */
+.song-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #1a232b;
+  padding: 9px 8px;
+  border-radius: var(--radius-sm);
+}
+.search-results .song-card:last-child {
+  border-bottom: none;
+}
+.song-card:hover {
+  background: var(--input-bg);
+}
+.song-card-name {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+.song-card-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.song-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.song-stat-value {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+.song-stat-label {
+  color: var(--text-label);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 /* --- Cards & generic ---------------------------------------------------- */
@@ -1822,5 +1826,201 @@ a:hover {
   .shows-card {
     min-width: 0;
   }
+}
+
+/* --- Songs page ----------------------------------------------------------- */
+.songs-search-input {
+  width: 100%;
+}
+.songs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+.songs-grid .song-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-md);
+  border-bottom: 1px solid var(--border-card);
+}
+.songs-grid .song-card:hover {
+  border-color: var(--accent-a66);
+  background: var(--bg-card);
+}
+
+/* Back link (left) + centered title, balanced by an empty third column so
+   the title stays centered on the row regardless of the back link's width. */
+.song-detail-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+}
+.song-detail-header .btn-link {
+  justify-self: start;
+}
+.song-detail-title {
+  justify-self: center;
+  text-align: center;
+}
+
+/* Stats panel (left) + predicted-show panel (right); stacks with stats
+   first on mobile since it's first in DOM order. */
+.song-detail-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .song-detail-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.song-detail-stats-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* Grid items also default to min-width: auto (content-based) — without
+     this, a long enough value/venue string anywhere inside could force the
+     whole grid track, and the page, wider than the viewport. */
+  min-width: 0;
+}
+.song-detail-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.song-detail-next-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.song-detail-next-show {
+  cursor: pointer;
+  background: color-mix(in srgb, var(--accent) 14%, var(--input-bg));
+  border: 1px solid var(--accent-a66);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  margin: 8px 0 0;
+  align-self: flex-start;
+}
+.song-detail-next-show:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.song-detail-venue {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  margin: 6px 0 4px;
+}
+.song-detail-model-control {
+  margin: 10px 0;
+}
+.song-detail-model-row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  margin-bottom: 8px;
+}
+.song-detail-dist-label {
+  margin-top: 12px;
+}
+.song-detail-dist-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.song-detail-dist-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  background: var(--input-bg);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.song-detail-dist-row:hover {
+  border-color: var(--accent-a66);
+}
+.song-detail-dist-date {
+  flex: 0 0 auto;
+  color: var(--text-primary);
+}
+.song-detail-dist-venue {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* Flex items default to min-width: auto (their content's natural width),
+     which overrides white-space: nowrap + text-overflow: ellipsis and lets
+     long venue names force the row — and the whole page — wider than the
+     viewport. min-width: 0 lets it actually shrink and truncate. */
+  min-width: 0;
+}
+.song-detail-dist-venue-name,
+.song-detail-dist-venue-loc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.song-detail-dist-venue-name {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.song-detail-dist-venue-loc {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.song-detail-dist-pct {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-weight: 700;
+}
+.song-detail-setlist-calls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+.song-detail-setlist-chip {
+  cursor: pointer;
+  background: color-mix(in srgb, var(--accent) 14%, var(--input-bg));
+  border: 1px solid var(--accent-a66);
+  color: var(--accent);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+.song-detail-setlist-chip:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.song-detail-phishnet {
+  color: var(--accent);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  text-decoration: none;
+  align-self: flex-start;
+  margin-top: 8px;
+}
+.song-detail-phishnet:hover {
+  text-decoration: underline;
 }
 

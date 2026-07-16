@@ -1,40 +1,58 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Screen } from "../App";
+import type { SearchResult } from "../search";
+import { fetchCatalog } from "../api";
+import { buildSongIndex, type SongIndex } from "../songStats";
+import type { Catalog, CatalogSong } from "../types";
+import SongCard from "./SongCard";
 
-export interface SearchNight {
-  date: string; // "2026-07-10" — jump target
-  label: string; // short date, e.g. "Fri · Jul 10"
-  pct: string;
-}
-export interface SearchResult {
-  slug: string;
-  song: string;
-  nights: SearchNight[];
-  /** Set when the song wasn't found in any loaded show's per-show rows but
-   *  has a meaningful tour-wide P(at least once) — see App.tsx `search`. */
-  tour?: { pct: string };
-}
+export type { SearchNight, SearchResult } from "../search";
 
 interface HeaderProps {
   screen: Screen;
   onSelectScreen: (s: Screen) => void;
   search: (query: string) => SearchResult[];
-  onGotoShow: (date: string) => void;
+  onGotoSong: (slug: string) => void;
 }
 
 const TABS: { id: Screen; label: string }[] = [
   { id: "tours", label: "Tours" },
   { id: "shows", label: "Shows" },
+  { id: "songs", label: "Songs" },
   { id: "personal", label: "Personal" },
   { id: "about", label: "About" },
 ];
 
-export default function Header({ screen, onSelectScreen, search, onGotoShow }: HeaderProps) {
+export default function Header({ screen, onSelectScreen, search, onGotoSong }: HeaderProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const hasSearch = open && query.trim().length > 0;
   const results = hasSearch ? search(query) : [];
+
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchCatalog()
+      .then((c) => {
+        if (!cancelled) setCatalog(c);
+      })
+      .catch(() => {
+        /* dropdown stats just stay hidden when the catalog can't load */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const songIndex: SongIndex | null = useMemo(
+    () => (catalog ? buildSongIndex(catalog) : null),
+    [catalog],
+  );
+  const songById = useMemo(() => {
+    const m = new Map<string, CatalogSong>();
+    for (const s of catalog?.songs ?? []) m.set(s.slug, s);
+    return m;
+  }, [catalog]);
 
   // Dismiss the results panel on outside click or Escape (input keeps its text).
   useEffect(() => {
@@ -53,10 +71,10 @@ export default function Header({ screen, onSelectScreen, search, onGotoShow }: H
     };
   }, [open]);
 
-  const jump = (date: string) => {
+  const selectSong = (slug: string) => {
     setOpen(false);
     setQuery("");
-    onGotoShow(date);
+    onGotoSong(slug);
   };
 
   return (
@@ -87,36 +105,26 @@ export default function Header({ screen, onSelectScreen, search, onGotoShow }: H
         />
         {hasSearch && (
           <div className="search-results">
-            {results.map((r) => (
-              <div className="search-result" key={r.slug}>
-                <div className="search-song">{r.song}</div>
-                <div className="night-chips">
-                  {r.nights.map((n) => (
-                    <button
-                      className="night-chip mono"
-                      key={n.date}
-                      title={`Open ${n.label} on the Shows screen`}
-                      onClick={() => jump(n.date)}
-                    >
-                      {n.label} <span className="pct">{n.pct}</span>
-                    </button>
-                  ))}
-                  {r.nights.length === 0 && r.tour && (
-                    <button
-                      className="tour-chip mono"
-                      title="P(at least once) across all scheduled shows — open Tours"
-                      onClick={() => {
-                        setOpen(false);
-                        setQuery("");
-                        onSelectScreen("tours");
-                      }}
-                    >
-                      {r.tour.pct} <span className="tour-chip-label">this tour</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+            {results.map((r) => {
+              const catalogSong = songById.get(r.slug);
+              return catalog && songIndex && catalogSong ? (
+                <SongCard
+                  key={r.slug}
+                  catalog={catalog}
+                  songIndex={songIndex}
+                  song={catalogSong}
+                  onSelect={selectSong}
+                />
+              ) : (
+                <button
+                  className="song-card"
+                  key={r.slug}
+                  onClick={() => selectSong(r.slug)}
+                >
+                  <div className="song-card-name">{r.song}</div>
+                </button>
+              );
+            })}
             {results.length === 0 && (
               <div className="search-empty">no candidate songs match</div>
             )}

@@ -446,6 +446,15 @@ def test_catalog_json(conn, tmp_path):
     # future shows are NOT in the catalog (no performances yet)
     assert "2026-07-10" not in catalog["by_show"]
 
+    # debut_date passed through from songs table (unset in the fixture -> null)
+    assert tweezer["debut_date"] is None
+
+    # show_tours maps each past showdate to a tour id (fixture leaves historical
+    # tour_name unset, so they all fall into tour_id_for(None) == "unknown")
+    assert catalog["show_tours"]["2022-06-01"] == "unknown"
+    assert set(catalog["show_tours"].keys()) == set(catalog["by_show"].keys())
+    assert {"id": "unknown", "tour_name": "unknown"} in catalog["tours"]
+
 
 def test_catalog_absent_without_flag(conn, tmp_path):
     publish(conn, tmp_path, n_sims=N_SIMS, seed=SEED)

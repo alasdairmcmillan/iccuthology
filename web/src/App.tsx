@@ -14,14 +14,15 @@ import type {
   ShowReport,
   TourReport,
 } from "./types";
-import Header, { type SearchResult } from "./components/Header";
+import Header from "./components/Header";
 import ToursScreen from "./components/ToursScreen";
 import ShowsScreen from "./components/ShowsScreen";
+import SongsScreen from "./components/SongsScreen";
 import PersonalScreen from "./components/PersonalScreen";
 import AboutScreen from "./components/AboutScreen";
-import { dateLabelDay, pct } from "./lib/format";
+import { searchSongs, type SearchResult } from "./search";
 
-export type Screen = "tours" | "shows" | "personal" | "about";
+export type Screen = "tours" | "shows" | "songs" | "personal" | "about";
 
 function todayIso(): string {
   const d = new Date();
@@ -53,6 +54,10 @@ export default function App() {
   // page's standings panel, reset to "upcoming" by any specific-show jump so
   // a later scorecards visit doesn't leak into an unrelated show lookup.
   const [showsInitialMode, setShowsInitialMode] = useState<"upcoming" | "past">("upcoming");
+  // Song slug SongsScreen should open detail for on mount — set by the
+  // header's quick-search "open song" jump, cleared on every other nav so a
+  // later plain visit to the Songs tab starts at the search/browse list.
+  const [songsInitialSlug, setSongsInitialSlug] = useState<string | null>(null);
 
   // Initial load: meta, schedule, tour, then every data-having show + its setlist.
   useEffect(() => {
@@ -93,44 +98,7 @@ export default function App() {
   // Live song search across all loaded (data-having) shows, reading each show's
   // headline source (falling back to whichever source key is present).
   const search = useMemo(() => {
-    return (query: string): SearchResult[] => {
-      const q = query.trim().toLowerCase();
-      if (!q) return [];
-      const seen = new Map<string, SearchResult>();
-      const dates = Object.keys(showsByDate).sort();
-      for (const date of dates) {
-        const sources = showsByDate[date].sources;
-        const headlineKey =
-          meta && sources[meta.headline_model] ? meta.headline_model : Object.keys(sources)[0];
-        for (const r of (headlineKey ? sources[headlineKey]?.rows : undefined) ?? []) {
-          if (!r.song.toLowerCase().includes(q)) continue;
-          let entry = seen.get(r.slug);
-          if (!entry) {
-            entry = { slug: r.slug, song: r.song, nights: [] };
-            seen.set(r.slug, entry);
-          }
-          entry.nights.push({
-            date,
-            label: dateLabelDay(date),
-            pct: pct(r.prob),
-          });
-        }
-      }
-      // Fall back to tour-level P(≥1) for songs absent from every loaded
-      // show's (truncated) per-show rows — e.g. low per-night-probability
-      // songs that still have a meaningful chance across the whole tour.
-      for (const r of tour?.rows ?? []) {
-        if (seen.has(r.slug)) continue;
-        if (!r.song.toLowerCase().includes(q)) continue;
-        seen.set(r.slug, {
-          slug: r.slug,
-          song: r.song,
-          nights: [],
-          tour: { pct: pct(r.p_at_least_one) },
-        });
-      }
-      return Array.from(seen.values()).slice(0, 6);
-    };
+    return (query: string): SearchResult[] => searchSongs(query, { showsByDate, meta, tour });
   }, [showsByDate, meta, tour]);
 
   const gotoShow = (date: string) => {
@@ -144,11 +112,24 @@ export default function App() {
     setScreen("shows");
   };
 
+  const gotoSongDetail = (slug: string) => {
+    setSongsInitialSlug(slug);
+    setScreen("songs");
+  };
+
+  // Plain tab navigation (as opposed to gotoSongDetail's jump) always clears
+  // songsInitialSlug, so a later visit to the Songs tab starts at the
+  // search/browse list rather than replaying a stale detail view.
+  const selectScreen = (s: Screen) => {
+    setSongsInitialSlug(null);
+    setScreen(s);
+  };
+
   const loaded = meta && schedule && tour;
 
   return (
     <>
-      <Header screen={screen} onSelectScreen={setScreen} search={search} onGotoShow={gotoShow} />
+      <Header screen={screen} onSelectScreen={selectScreen} search={search} onGotoSong={gotoSongDetail} />
       <main className="page">
         {!loaded && <div className="loading">Loading predictions…</div>}
         {loaded && screen === "tours" && (
@@ -169,6 +150,16 @@ export default function App() {
             selectedShows={selectedShows}
             onChangeSelected={setSelectedShows}
             initialMode={showsInitialMode}
+          />
+        )}
+        {loaded && screen === "songs" && (
+          <SongsScreen
+            meta={meta}
+            schedule={schedule}
+            showsByDate={showsByDate}
+            tour={tour}
+            initialSlug={songsInitialSlug}
+            onGotoShow={gotoShow}
           />
         )}
         {loaded && screen === "personal" && <PersonalScreen schedule={schedule} />}
