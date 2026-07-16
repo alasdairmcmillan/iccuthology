@@ -420,16 +420,14 @@ export default function ShowsScreen({
 
   return (
     <>
-      {/* Toolbar band: the "Build your run" block (upcoming mode) shares a row
-          with the mode toggle so the toggle doesn't strand a mostly-empty band
-          above the content. Mobile stacks them, toggle first — see
-          .shows-toolbar in styles.css. */}
+      {/* Toolbar band: one 43px control row in BOTH modes — the "Build your
+          run" picker (upcoming only) has its label inline, so the toggle sits
+          at the exact same spot whichever mode is active. Mobile stacks them,
+          toggle first — see .shows-toolbar in styles.css. */}
       <div className="shows-toolbar">
         {mode === "upcoming" && (
-          <div>
-            <div className="label-caps" style={{ marginBottom: 8 }}>
-              Build your run:
-            </div>
+          <div className="control shows-run-control">
+            <span className="control-label">Build your run:</span>
             <div className="multiselect" ref={multiselectRef}>
               <button className="multiselect-toggle" onClick={() => setDropdownOpen((o) => !o)}>
                 <span className="multiselect-summary">{summary}</span>

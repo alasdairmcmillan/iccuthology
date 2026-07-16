@@ -803,23 +803,36 @@ a:hover {
 }
 
 /* --- Mode toggle (Shows: Upcoming vs Past scorecards) -------------------- */
-/* Toolbar band shared by the "Build your run" block (upcoming mode) and the
-   mode toggle, so the toggle's row carries content instead of dead space.
-   The toggle hugs the right edge; the "Small screens" breakpoint below
+/* Toolbar band shared by the "Build your run" control (upcoming mode) and the
+   mode toggle. Both sides are a single 43px row — the run-picker label is
+   INLINE (not stacked above) — so the toggle occupies the exact same spot in
+   both modes instead of jumping when the left side appears/disappears. The
+   toggle hugs the right edge; the "Small screens" breakpoint below
    (max-width: 720px) stacks them, toggle first. */
 .shows-toolbar {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 16px;
   margin-bottom: 24px;
 }
-/* The toggle sits on the same band as the multiselect control and matches
-   its rendered height (43px = .multiselect-toggle's 12px padding-block +
-   ~17px line + 1px borders) so the two read as one row of controls. */
+/* The toggle matches the multiselect control's rendered height (43px =
+   .multiselect-toggle's 12px padding-block + ~17px line + 1px borders) so
+   the two read as one row of controls. */
 .shows-toolbar .mode-toggle {
   margin-left: auto;
   height: 43px;
   align-items: center;
+}
+/* The run picker keeps its 380px design width but may shrink between the
+   inline label and the toggle rather than overflow. */
+.shows-run-control {
+  flex: 1 1 auto;
+}
+.shows-run-control .multiselect {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: 380px;
+  min-width: 0;
 }
 .mode-toggle {
   display: inline-flex;
@@ -1698,6 +1711,18 @@ a:hover {
   }
   .shows-toolbar .mode-toggle {
     margin-left: 0;
+  }
+  /* Stacked toolbar: the run picker takes the full width again (its dropdown
+     panel matches the picker's width, so narrow = unreadable venue names).
+     The toggle is above it in the column, so it stays static either way. */
+  .shows-run-control {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    width: 100%;
+  }
+  .shows-run-control .multiselect {
+    max-width: 100%;
   }
   /* Search drops to its own full-width row under the tabs. */
   .search-wrap {
