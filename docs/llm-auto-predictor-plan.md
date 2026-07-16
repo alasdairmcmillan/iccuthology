@@ -189,3 +189,81 @@ this exists). Sketch:
   models; the `MODEL:` label returns as the picker.
 - **Prereq:** the auto-predictor above, so non-heuristic models actually have
   fresh per-show probs across the whole horizon worth aggregating.
+
+## API tool-calling feasibility (research spike, 2026-07-14)
+
+Status: research only, not implementation — see branch
+`api-agent-tool-calling-research`, `scripts/api_agent_prototype.py`. Answers
+two questions raised before committing to a design for the auto-predictor
+above:
+
+**Q1: Is the manual Claude Code/Antigravity + MCP tool-calling workflow (a
+human drives an IDE that autonomously calls `phishpred-mcp`'s research tools
+across multiple turns, then submits) replicable by calling a provider's API
+directly, instead of driving an IDE by hand?**
+
+**Yes — confirmed live, for two of three providers.** Anthropic's native
+`mcp_servers` connector doesn't apply here (it only attaches to remote
+URL-based MCP servers; `phishpred-mcp` is local stdio). The actual replication
+path is simpler and more general: spawn the existing `phishpred-mcp` server as
+a subprocess, connect an MCP client (`mcp.client.stdio.stdio_client` +
+`mcp.ClientSession`), and drive a normal multi-turn tool-calling loop against
+it with whichever provider's API — this is exactly what Claude Code/Antigravity
+already do under the hood; nothing about the server needed to change.
+
+Per-provider integration depth, from an actual run of each against a real
+upcoming show (2026-07-14, Enmarket Arena):
+
+| Provider | Integration | Live result |
+|---|---|---|
+| **Anthropic** (`claude-opus-4-8`) | Official SDK helper: `anthropic.lib.tools.mcp.async_mcp_tool` wraps each MCP tool directly for `client.beta.messages.tool_runner`, which drives the whole loop. Least glue of the three. | 11 autonomous tool calls in a sensible research order (`scoreboard` → `show_length_stats` → `upcoming_shows` → `run_context` → `recent_setlists` → `candidate_features` → `heuristic_prediction` → `venue_history` → `backtest_shortlist` → `slot_propensities` → `submit_prediction`), then a valid 30-song submission with a full setlist. |
+| **Google** (`gemini-3.1-flash-lite`) | `google-genai` has *native* MCP support — `GenerateContentConfig(tools=[session])` lets the SDK list/call tools against a raw `ClientSession` itself, no manual loop. **But it's broken as tested**: `generate_content` deep-copies its config internally, and a live `ClientSession` embeds asyncio internals (`TypeError: cannot pickle '_asyncio.Future' object`) — a real bug hit by actually running it, not a hypothetical. Fallback: `FunctionDeclaration(parameters_json_schema=tool.inputSchema)` (raw MCP JSON Schema passed through untouched, no conversion needed) + a manual loop, same shape as OpenAI below. | 8 autonomous tool calls (`upcoming_shows` → `scoreboard` → `run_context` → `recent_setlists` → `candidate_features` → `heuristic_prediction` → `slot_propensities` → `submit_prediction`), valid 30-song submission with setlist. |
+| **OpenAI** | No local MCP client support (only remote-URL MCP on the Responses API, same shape/limitation as Anthropic's connector). Manual loop; MCP `inputSchema` is already JSON Schema so the tool-schema conversion is a near-passthrough (`{"type":"function","function":{"name","description","parameters": tool.inputSchema}}`). Most glue of the three, but still small. | **Not run live** — no `OPENAI_API_KEY` in `.env.local`. Code path was written and reviewed (same manual-loop pattern proven live on Google) but not exercised against the real API. |
+
+Both live submissions were verified: 20–40 songs, valid probs, a full
+structured setlist, and — checked against `heuristic_prediction` for the same
+show — meaningful song overlap (25–26/30, expected, since both draw on the
+same rotation-heavy candidates) but **zero exact-probability matches**,
+confirming each model computed its own numbers rather than copying the
+baseline (the plagiarism-check pattern from `AGENTS.md`).
+
+**Google free-tier note:** `gemini-3.5-flash` (the label already used
+elsewhere in this project) hit its free-tier daily quota (20 requests) during
+testing from repeated attempts across a multi-turn loop — free-tier RPM/RPD
+limits are tight enough that a ~10-call research loop can burn through a
+day's quota on one show. `gemini-3.1-flash-lite` had headroom. Worth knowing
+before wiring any automated Google track to a free-tier key.
+
+**Q2: Is the heuristic setlist already available to models via MCP as a
+baseline for their own predictions?**
+
+**Yes, already built — no new work needed.** `heuristic_prediction(conn,
+showdate, ...)` in `src/phishpred/mcp/tools.py` wraps
+`predict.predict_show(model="heuristic")` and is exposed as an MCP tool in
+`server.py` (`heuristic_prediction`). Both live runs above called it as part
+of their research (Anthropic 7th call, Google 6th call) before submitting —
+exactly the "beat it, don't copy it" framing in the canonical prompt.
+
+### Recommendation
+
+This tool-calling architecture is a genuinely different (and stronger) design
+than the single-shot completion `llm-submit` design earlier in this doc:
+`models/llm.py`'s `LLMSongModel` stuffs candidate features into one prompt and
+parses one JSON response — it never sees `song_history`, `venue_history`,
+`slot_propensities`, `backtest_shortlist`, or `heuristic_prediction`, all of
+which the live runs above used unprompted. If/when `llm-submit` moves off
+hold, building it on the tool-calling loop (reusing `phishpred-mcp` as-is,
+per-provider adapters as sketched above) would let the automated pipeline do
+the same research a human-driven session does today, not a feature-stuffed
+single call.
+
+Per the user's stated fallback: since OpenAI/Google both required no more
+than "convert MCP JSON Schema to the provider's tool format + a manual loop"
+(proven live for Google; the OpenAI path is the same shape, just untested
+live), none of the three providers is "wildly complicated" — the honest
+ranking is Anthropic (official helper, zero glue) > OpenAI (small manual loop,
+near-passthrough schema) > Google (small manual loop, but only after routing
+around the native-but-broken `ClientSession` passthrough). There's no
+provider here where staying on the human-driven MCP workflow is clearly
+necessary; it remains an option for OpenAI specifically until it's been
+verified live with a real key.
