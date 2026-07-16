@@ -253,7 +253,9 @@ def _catalog(conn: sqlite3.Connection) -> dict:
     """Compact history catalog for the client-side personalized 'due to see'
     view: global per-song play stats (for ranking) + each past show's songids
     (so the browser can compute a user's seen-songs from their seedfile, then
-    reduce samples.bin locally). See DEPLOY-CONTRACTS §2a."""
+    reduce samples.bin locally), plus a historical show->tour map (so the
+    browser can derive "played in N of the last M tours" for the Songs page
+    without a second fetch). See DEPLOY-CONTRACTS §2a."""
     songs = features.song_play_catalog(conn)  # shared with personal.unlikely_unseen
     by_show: dict[str, set] = {}
     for r in conn.execute(
@@ -262,13 +264,27 @@ def _catalog(conn: sqlite3.Connection) -> dict:
         "WHERE sh.exclude = 0 AND sh.show_index IS NOT NULL"
     ):
         by_show.setdefault(str(r["showdate"]), set()).add(int(r["songid"]))
+
+    show_tours: dict[str, str] = {}
+    tour_names: dict[str, str] = {}
+    for r in conn.execute(
+        "SELECT showdate, tour_name FROM shows "
+        "WHERE exclude = 0 AND show_index IS NOT NULL ORDER BY showdate"
+    ):
+        tid = tour_id_for(r["tour_name"])
+        show_tours[str(r["showdate"])] = tid
+        tour_names.setdefault(tid, r["tour_name"] or tid)
+
     return {
         "songs": [
             {"songid": int(r["songid"]), "slug": r["slug"], "name": r["name"],
-             "plays": int(r["plays"]), "last": r["last_played"]}
+             "plays": int(r["plays"]), "last": r["last_played"],
+             "debut_date": r["debut_date"]}
             for r in songs
         ],
         "by_show": {d: sorted(ids) for d, ids in sorted(by_show.items())},
+        "show_tours": dict(sorted(show_tours.items())),
+        "tours": [{"id": tid, "tour_name": name} for tid, name in tour_names.items()],
     }
 
 

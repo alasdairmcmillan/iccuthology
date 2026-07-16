@@ -255,13 +255,18 @@ tolerate its absence in snapshots published before it was added).
 History for the client-side personalized "due to see" view: the browser fetches a
 user's phish.net seedfile (attended showdates), computes their seen-songs from
 `by_show`, then reduces `samples.bin` locally for the unseen songs (no per-user
-server compute). Epoch-pinned; ~one file, CDN-cached.
+server compute). Also backs the Songs page's client-side stats (% of shows played,
+plays/year, tour frequency) — `show_tours` + `tours` let the browser group `by_show`
+play-dates by tour without a second fetch. Epoch-pinned; ~one file, CDN-cached.
 ```json
 {
   "epoch": "a1b2c3d4e5f6",
   "songs": [{"songid": 123, "slug": "harry-hood", "name": "Harry Hood",
-             "plays": 421, "last": "2026-07-07"}],   // sorted by plays desc — the ranking axis
-  "by_show": {"2024-08-06": [12, 45, 88, "..."]}      // each PAST show -> songids played
+             "plays": 421, "last": "2026-07-07", "debut_date": "1990-01-01"}],
+             // sorted by plays desc — the ranking axis; debut_date may be null
+  "by_show": {"2024-08-06": [12, 45, 88, "..."]},     // each PAST show -> songids played
+  "show_tours": {"2024-08-06": "summer-2024"},        // each PAST show -> tour id (tour_id_for)
+  "tours": [{"id": "summer-2024", "tour_name": "2024 Summer Tour"}]  // tour id -> display name
 }
 ```
 

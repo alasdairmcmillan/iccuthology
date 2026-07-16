@@ -154,6 +154,12 @@ export interface CatalogSong {
   name: string;
   plays: number;
   last: string | null;
+  /** absent on snapshots published before this field existed */
+  debut_date?: string | null;
+}
+export interface CatalogTour {
+  id: string;
+  tour_name: string;
 }
 export interface Catalog {
   epoch: string;
@@ -161,6 +167,12 @@ export interface Catalog {
   songs: CatalogSong[];
   /** each PAST showdate -> songids played */
   by_show: Record<string, number[]>;
+  /** each PAST showdate -> tour id (tour_id_for); absent on snapshots
+   *  published before this field existed */
+  show_tours?: Record<string, string>;
+  /** tour id -> display name; absent on snapshots published before this
+   *  field existed */
+  tours?: CatalogTour[];
 }
 
 // GET /api/samples-meta -> samples_meta.json  (DEPLOY-CONTRACTS.md §2)
@@ -372,4 +384,27 @@ export interface RunReport {
   missing: string[];
   /** true when produced by the offline union approximation (no samples.bin). */
   approximate?: boolean;
+}
+
+// GET /api/chaser/{slug} -> chaser reduction (mirrors modes.ChaserReport, minus
+// the DB-only fields the Worker can't fill in from samples.bin alone: `model`,
+// `historical_play_count`, `low_signal_caveat`).
+export interface ChaserShowProb {
+  showid: number | null;
+  showdate: string;
+  probability: number;
+}
+export interface ChaserReport {
+  song: string;
+  slug: string;
+  songid: number;
+  epoch: string;
+  n_sims: number;
+  horizon_showids?: number[];
+  horizon_dates: string[];
+  p_not_within_horizon: number;
+  modal_show_date: string | null;
+  median_show_date: string | null;
+  expected_shows_until_next_play: number | null;
+  distribution: ChaserShowProb[];
 }

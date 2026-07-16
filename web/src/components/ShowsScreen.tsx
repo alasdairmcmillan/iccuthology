@@ -43,7 +43,7 @@ interface ShowsScreenProps {
   initialMode?: "upcoming" | "past";
 }
 
-interface ModelOption {
+export interface ModelOption {
   id: string;
   label: string;
 }
@@ -56,7 +56,7 @@ interface ModelOption {
 // folded into show/{date}.json) renders its ranked per-song shortlist plus
 // rationale. Only a source absent from the night entirely shows the
 // "no predictions yet" note.
-function deriveModelOptions(
+export function deriveModelOptions(
   meta: Meta,
   showsByDate: Record<string, ShowReport>,
 ): ModelOption[] {
@@ -81,7 +81,7 @@ function deriveModelOptions(
   });
 }
 
-function setKeyLabel(key: string): string {
+export function setKeyLabel(key: string): string {
   if (key === "e") return "Encore";
   if (key === "e2") return "Encore 2";
   if (/^\d+$/.test(key)) return `Set ${key}`;
