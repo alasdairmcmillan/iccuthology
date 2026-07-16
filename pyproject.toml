@@ -20,6 +20,9 @@ dependencies = [
 [project.optional-dependencies]
 deploy = ["boto3"]          # R2 push/pull (S3 API) for the publish workflow
 mcp = ["mcp>=1.0"]          # phishpred-mcp agent submission server
+agent-research = ["anthropic[mcp]", "openai", "google-genai", "mcp>=1.0"]
+                            # scripts/api_agent_prototype.py only -- research
+                            # spike, not part of the shipped pipeline
 
 [project.scripts]
 phishpred = "phishpred.cli:main"
