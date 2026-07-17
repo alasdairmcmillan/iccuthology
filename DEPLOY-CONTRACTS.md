@@ -265,6 +265,9 @@ play-dates by tour without a second fetch. Epoch-pinned; ~one file, CDN-cached.
              "plays": 421, "last": "2026-07-07", "debut_date": "1990-01-01"}],
              // sorted by plays desc — the ranking axis; debut_date may be null
   "by_show": {"2024-08-06": [12, 45, 88, "..."]},     // each PAST show -> songids played
+  "stat_dates": ["1985-09-27", "..."],                // every PAST showdate phish.net counts for
+             // stats -- broader than by_show's keys (includes shows with no documented setlist,
+             // mostly pre-1992); "% of shows played" denominator on the Songs page
   "show_tours": {"2024-08-06": "summer-2024"},        // each PAST show -> tour id (tour_id_for)
   "tours": [{"id": "summer-2024", "tour_name": "2024 Summer Tour"}]  // tour id -> display name
 }

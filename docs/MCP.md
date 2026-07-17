@@ -67,6 +67,13 @@ setlist across nights. When predicting or submitting, follow these rules:
    you gave a high probability for night 1 should be heavily discounted for
    nights 2-3 of that run (and vice versa) -- don't independently maximize
    each night's prediction as if the others didn't exist.
+4. **Do not template-and-copy across nights of a long run.** A real failure
+   (claude-haiku, 2026-07-16): a 2-night run came out fine, but on a 5-night
+   run, nights 2-5 were submitted with essentially the same setlist and
+   rationale as night 1. Treat each night as its own research-and-submit
+   pass; before submitting night N of a run, explicitly track (yourself --
+   no tool does this) the union of slugs already committed to nights 1..N-1
+   of that SAME run and exclude them, however many nights the run has.
 
 ## Tools
 
@@ -302,6 +309,12 @@ Hard rules:
   (played_prev_show=1).
 - If predicting multiple nights of one run, the nights must be jointly
   consistent: a song called high for night 1 gets discounted for nights 2-3.
+- Known failure: on long runs (4-5+ nights), it's easy to draft one setlist
+  "for the run" and reuse it across nights. Process one night at a time and
+  explicitly exclude every slug already committed to an earlier night of the
+  SAME run before writing the next one -- this failed for real on a 5-night
+  run (nights 2-5 came out as near-duplicates of night 1) even though a
+  2-night run in the same batch was fine.
 
 Then submit ONE call per show:
 submit_prediction(

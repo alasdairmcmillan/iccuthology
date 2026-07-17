@@ -14,3 +14,4 @@ data/predictions/submitted/
 data/frozen/
 data/scorecards/
 tmp/
+agents/antigravity/last_seen_showdate.txt

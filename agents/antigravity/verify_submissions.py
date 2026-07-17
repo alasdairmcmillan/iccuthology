@@ -9,7 +9,14 @@ def main():
         print(f"Directory {sub_dir} does not exist.")
         return
         
+    from phishpred.db import get_connection
+    from phishpred.mcp import tools
+    conn = get_connection("data/phish.db")
+    upcoming_res = tools.upcoming_shows(conn, limit=50)
+    upcoming_dates = {s["showdate"] for s in upcoming_res.get("shows", [])}
+    
     json_files = sorted(sub_dir.glob("*.json"))
+    json_files = [f for f in json_files if f.stem in upcoming_dates]
     print(f"Verifying {len(json_files)} files in {sub_dir}...\n")
     
     failed = 0
