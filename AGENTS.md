@@ -99,6 +99,16 @@ Hard rules (Phish rotation, non-negotiable):
 - Multi-night submissions must be **jointly consistent**: a song you call
   high for night 1 gets discounted for later nights of that run, and vice
   versa. Do not maximize each night independently.
+- **Known failure mode (observed 2026-07-16, claude-haiku track):** on a
+  5-night run, nights 2-5 were submitted with the same setlist and rationale
+  as night 1, essentially copy-pasted — a 2-night run had been fine, but the
+  shortcut crept in once the run got longer than 2 nights. Do NOT draft one
+  setlist "for the run" and reuse it. Process each night as its own research
+  pass; before writing night N of a run, explicitly list the slugs you
+  already committed to nights 1..N-1 of that SAME run in this session (no
+  tool tracks this for you) and exclude them. For a run of 3+ nights this
+  means keeping a running exclusion set, not just comparing to the
+  immediately previous night.
 
 ### 4. Submit — one call per show, ALL THREE parts every time
 
