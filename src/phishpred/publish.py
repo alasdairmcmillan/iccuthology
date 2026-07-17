@@ -265,6 +265,37 @@ def _catalog(conn: sqlite3.Connection) -> dict:
     ):
         by_show.setdefault(str(r["showdate"]), set()).add(int(r["songid"]))
 
+    # "% of shows played" (Songs page) denominator: every show phish.net
+    # itself counts, which is broader than by_show's keys. `shows.exclude`
+    # also covers shows we simply have no setlist for (ingest.py's Rule 1
+    # auto-exclude) -- but phish.net still counts an undocumented-yet-public
+    # show (mostly pre-1992, before setlist-keeping was consistent) toward
+    # its own total. Only the API's own exclude_from_stats flag (persisted
+    # in meta as forced_exclude_showids) should drop a show from this list.
+    forced_exclude: set[int] = set()
+    meta_row = conn.execute(
+        "SELECT value FROM meta WHERE key = 'forced_exclude_showids'"
+    ).fetchone()
+    if meta_row is not None and meta_row["value"]:
+        try:
+            forced_exclude = set(json.loads(meta_row["value"]))
+        except (ValueError, TypeError):
+            forced_exclude = set()
+    as_of_date, _ = _as_of(conn)
+    stat_dates = (
+        sorted(
+            {
+                str(r["showdate"])
+                for r in conn.execute(
+                    "SELECT showid, showdate FROM shows WHERE showdate <= ?", (as_of_date,)
+                )
+                if r["showid"] not in forced_exclude
+            }
+        )
+        if as_of_date
+        else []
+    )
+
     show_tours: dict[str, str] = {}
     tour_names: dict[str, str] = {}
     for r in conn.execute(
@@ -283,6 +314,7 @@ def _catalog(conn: sqlite3.Connection) -> dict:
             for r in songs
         ],
         "by_show": {d: sorted(ids) for d, ids in sorted(by_show.items())},
+        "stat_dates": stat_dates,
         "show_tours": dict(sorted(show_tours.items())),
         "tours": [{"id": tid, "tour_name": name} for tid, name in tour_names.items()],
     }

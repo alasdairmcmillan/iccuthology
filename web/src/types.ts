@@ -167,6 +167,11 @@ export interface Catalog {
   songs: CatalogSong[];
   /** each PAST showdate -> songids played */
   by_show: Record<string, number[]>;
+  /** every PAST showdate phish.net counts for stats purposes (broader than
+   *  by_show's keys -- includes shows with no documented setlist, mostly
+   *  pre-1992); the Songs page's "% of shows played" denominator. Absent on
+   *  snapshots published before this field existed. */
+  stat_dates?: string[];
   /** each PAST showdate -> tour id (tour_id_for); absent on snapshots
    *  published before this field existed */
   show_tours?: Record<string, string>;

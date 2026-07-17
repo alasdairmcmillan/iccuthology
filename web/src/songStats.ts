@@ -19,7 +19,11 @@ export interface SongIndex {
 }
 
 export function buildSongIndex(catalog: Catalog): SongIndex {
-  const allDates = Object.keys(catalog.by_show).sort();
+  // stat_dates (broader than by_show's keys -- includes undocumented-setlist
+  // shows phish.net still counts, mostly pre-1992) is the "% of shows played"
+  // denominator; fall back to by_show's keys on snapshots published before
+  // this field existed.
+  const allDates = (catalog.stat_dates ?? Object.keys(catalog.by_show)).slice().sort();
   const playedDates = new Map<number, string[]>();
   for (const date of allDates) {
     for (const songid of catalog.by_show[date]) {
