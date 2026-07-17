@@ -1733,10 +1733,14 @@ a:hover {
     order: 3;
     width: 100%;
   }
-  /* Tabs shrink to fit narrow phones; overflow-x above is the fallback
-     if a label ever still doesn't fit. */
+  /* Tabs shrink to fit narrow phones so all five (Tours…About) fit within the
+     row without the active tab's highlight clipping at the right edge; the
+     overflow-x above stays as a fallback for anything even narrower. */
+  .tabs {
+    gap: 4px;
+  }
   .tab {
-    padding: 7px 12px;
+    padding: 7px 9px;
     font-size: 12px;
   }
   .search-results {

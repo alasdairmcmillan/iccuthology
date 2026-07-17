@@ -26,7 +26,13 @@ export function buildSongIndex(catalog: Catalog): SongIndex {
   const allDates = (catalog.stat_dates ?? Object.keys(catalog.by_show)).slice().sort();
   const playedDates = new Map<number, string[]>();
   for (const date of allDates) {
-    for (const songid of catalog.by_show[date]) {
+    // stat_dates is a superset of by_show's keys: it counts undocumented shows
+    // (mostly pre-1992) that phish.net tallies but for which we have no setlist,
+    // so by_show[date] is undefined for those. Skip them -- they belong in the
+    // denominator (allDates) but contribute no plays.
+    const ids = catalog.by_show[date];
+    if (!ids) continue;
+    for (const songid of ids) {
       const arr = playedDates.get(songid);
       if (arr) arr.push(date);
       else playedDates.set(songid, [date]);
