@@ -720,8 +720,8 @@ export default function ShowsScreen({
             ) : (
               <>
                 {/* SCORES BAND (full width) — parallels the Upcoming tab: model
-                    header, improvement arc + version chips, then the shortlist
-                    metrics and (when a call was scored) the setlist-call metrics,
+                    header, improvement arc + version chips, then the setlist-call
+                    metrics (when a call was scored) and the shortlist metrics,
                     grouped with small labels, plus the callouts. */}
                 <div className="card scores-band">
                   <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -790,58 +790,9 @@ export default function ShowsScreen({
                     </div>
                   )}
 
-                  {/* Shortlist metric group */}
-                  <div className="metric-group">
-                    <div className="metric-group-label">Shortlist</div>
-                    <div className="metrics-strip">
-                      <div className="metric">
-                        <TipLabel
-                          text={`Hit rate · top ${shownTake.metrics.top_n}`}
-                          tip={hitRateTip(shownTake.metrics.top_n)}
-                        />
-                        <span className="metric-value">
-                          {pct1(shownTake.metrics.hit_rate_top20)}
-                        </span>
-                        <span className="metric-sub">
-                          {shownTake.metrics.hits_top20}/
-                          {Math.min(shownTake.metrics.top_n, shownTake.nRows)} hit
-                        </span>
-                      </div>
-                      <div className="metric">
-                        <TipLabel text="Recall" tip={METRIC_TIPS.recall} />
-                        <span className="metric-value">{pct1(shownTake.metrics.recall)}</span>
-                        <span className="metric-sub">of {activeScorecard.n_played} played</span>
-                      </div>
-                      <div className="metric">
-                        <TipLabel text="Brier" tip={METRIC_TIPS.brier} />
-                        <span className="metric-value">{shownTake.metrics.brier.toFixed(3)}</span>
-                        <span className="metric-sub">lower = better</span>
-                      </div>
-                      {vsHeuristicDelta !== null ? (
-                        <div className="metric">
-                          <TipLabel text="vs heuristic" tip={METRIC_TIPS.vsHeuristic} />
-                          <span
-                            className={
-                              "metric-value" + (vsHeuristicDelta >= 0 ? " pos" : " neg")
-                            }
-                          >
-                            {formatSignedPct(vsHeuristicDelta)}
-                          </span>
-                          <span className="metric-sub">vs baseline</span>
-                        </div>
-                      ) : (
-                        <div className="metric">
-                          <span className="metric-label">Log loss</span>
-                          <span className="metric-value">
-                            {shownTake.metrics.log_loss.toFixed(3)}
-                          </span>
-                          <span className="metric-sub">lower = better</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Setlist-call metric group — only when a call was scored */}
+                  {/* Setlist-call metric group — only when a call was scored.
+                      Leads the band, matching the standings' setlist-first
+                      ordering. */}
                   {shownTake.setlistScore && (
                     <div className="metric-group">
                       <div className="metric-group-head">
@@ -896,6 +847,57 @@ export default function ShowsScreen({
                       )}
                     </div>
                   )}
+
+                  {/* Shortlist metric group */}
+                  <div className="metric-group">
+                    <div className="metric-group-label">Shortlist</div>
+                    <div className="metrics-strip">
+                      <div className="metric">
+                        <TipLabel
+                          text={`Hit rate · top ${shownTake.metrics.top_n}`}
+                          tip={hitRateTip(shownTake.metrics.top_n)}
+                        />
+                        <span className="metric-value">
+                          {pct1(shownTake.metrics.hit_rate_top20)}
+                        </span>
+                        <span className="metric-sub">
+                          {shownTake.metrics.hits_top20}/
+                          {Math.min(shownTake.metrics.top_n, shownTake.nRows)} hit
+                        </span>
+                      </div>
+                      <div className="metric">
+                        <TipLabel text="Recall" tip={METRIC_TIPS.recall} />
+                        <span className="metric-value">{pct1(shownTake.metrics.recall)}</span>
+                        <span className="metric-sub">of {activeScorecard.n_played} played</span>
+                      </div>
+                      <div className="metric">
+                        <TipLabel text="Brier" tip={METRIC_TIPS.brier} />
+                        <span className="metric-value">{shownTake.metrics.brier.toFixed(3)}</span>
+                        <span className="metric-sub">lower = better</span>
+                      </div>
+                      {vsHeuristicDelta !== null ? (
+                        <div className="metric">
+                          <TipLabel text="vs heuristic" tip={METRIC_TIPS.vsHeuristic} />
+                          <span
+                            className={
+                              "metric-value" + (vsHeuristicDelta >= 0 ? " pos" : " neg")
+                            }
+                          >
+                            {formatSignedPct(vsHeuristicDelta)}
+                          </span>
+                          <span className="metric-sub">vs baseline</span>
+                        </div>
+                      ) : (
+                        <div className="metric">
+                          <span className="metric-label">Log loss</span>
+                          <span className="metric-value">
+                            {shownTake.metrics.log_loss.toFixed(3)}
+                          </span>
+                          <span className="metric-sub">lower = better</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
                   {(shownTake.bestCall || shownTake.biggestWhiff) && (
                     <div className="callouts">

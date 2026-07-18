@@ -1261,11 +1261,19 @@ a:hover {
    accent plus a direction caret. Each chip is also a StatPopover trigger, so
    the old column-header tooltips survive the card redesign (hover/tap shows
    the metric definition; click sorts and harmlessly toggles the tip). */
+.standings-chip-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 14px 0;
+}
+.standings-chip-group .metric-group-label {
+  margin-bottom: 6px;
+}
 .standings-chips {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  margin: 14px 0;
 }
 .standings-chip {
   cursor: pointer;
@@ -1292,6 +1300,14 @@ a:hover {
 .standings-chip:focus-visible {
   outline: none;
   border-color: var(--accent);
+}
+/* Definition of the currently-selected sort metric — inline between the
+   chip clusters and the model cards, replacing the per-chip popovers. */
+.standings-active-tip {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  margin-bottom: 14px;
 }
 .standings-model {
   color: var(--text-primary);
@@ -1397,11 +1413,16 @@ a:hover {
   flex-shrink: 0;
 }
 .mcard-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border-row);
+}
+.mcard-metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   gap: 10px 14px;
-  padding: 12px 16px 14px;
-  border-top: 1px solid var(--border-row);
 }
 .mcard-metric {
   display: flex;
