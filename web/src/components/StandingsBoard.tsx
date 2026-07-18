@@ -23,36 +23,36 @@ interface MetricDef {
   signed?: boolean;
   /** In the sort-chip row (detail-only metrics like Exact calls are not). */
   sortable?: boolean;
+  /** Which labelled cluster the metric belongs to — mirrors the scores
+   *  band's Setlist call / Shortlist grouping. */
+  group: "setlist" | "shortlist";
 }
 
 const count = (v: number) => String(v);
 
-// Chip order mirrors the old table's columns; detail-only extras follow.
+// Declared in display order: setlist-call metrics first, then shortlist,
+// with context denominators (List/Shows) at the shortlist tail. Both the
+// chip clusters and the detail grid read straight off this order.
 const METRICS: MetricDef[] = [
-  { id: "setlist", label: "Setlist", tip: METRIC_TIPS.setlistHitRate, value: (m) => m.setlist?.hit_rate ?? null, format: pct1, best: true, sortable: true },
-  { id: "placed", label: "Placed", tip: METRIC_TIPS.placedRate, value: (m) => m.setlist?.placed_rate ?? null, format: pct1, best: true, sortable: true },
-  { id: "shows", label: "Shows", tip: METRIC_TIPS.shows, value: (m) => m.n_shows, format: count, sortable: true },
-  { id: "hit20", label: "Hit·20", tip: hitRateTip(20), value: (m) => m.hit_rate_top20, format: pct1, best: true, sortable: true },
-  { id: "recall", label: "Recall", tip: METRIC_TIPS.recall, value: (m) => m.recall, format: pct1, best: true, sortable: true },
-  { id: "brier", label: "Brier", tip: METRIC_TIPS.brier, value: (m) => m.brier, format: (v) => v.toFixed(3), lowerBetter: true, best: true, sortable: true },
-  { id: "list", label: "List", tip: METRIC_TIPS.list, value: (m) => m.avg_n_rows, format: (v) => v.toFixed(1), sortable: true },
-  { id: "vs_heur", label: "Δ base", tip: METRIC_TIPS.vsHeuristic, value: (m) => m.vs_heuristic?.hit_rate_top20_delta ?? null, format: formatSignedPct, signed: true, best: true, sortable: true },
-  { id: "sharp", label: "Sharp", tip: METRIC_TIPS.sharp, value: (m) => m.setlist?.sharpshooters ?? null, format: count, best: true, sortable: true },
-  { id: "refresh", label: "Refresh", tip: METRIC_TIPS.refreshGain, value: (m) => m.refresh_gain?.mean_hit_rate_top20_delta ?? null, format: formatSignedPct, signed: true, best: true, sortable: true },
-  { id: "weighted", label: "Weighted", tip: METRIC_TIPS.setlistWeighted, value: (m) => m.setlist?.weighted_score ?? null, format: pct1, best: true },
-  { id: "exact", label: "Exact calls", tip: METRIC_TIPS.exactCalls, value: (m) => m.setlist?.exact_calls ?? null, format: count },
-  { id: "marquee", label: "Marquee", tip: METRIC_TIPS.marqueeCalls, value: (m) => m.setlist?.marquee_calls ?? null, format: count },
+  { id: "weighted", label: "Weighted", tip: METRIC_TIPS.setlistWeighted, value: (m) => m.setlist?.weighted_score ?? null, format: pct1, best: true, sortable: true, group: "setlist" },
+  { id: "setlist", label: "Hit Rate", tip: METRIC_TIPS.setlistHitRate, value: (m) => m.setlist?.hit_rate ?? null, format: pct1, best: true, sortable: true, group: "setlist" },
+  { id: "placed", label: "Placed", tip: METRIC_TIPS.placedRate, value: (m) => m.setlist?.placed_rate ?? null, format: pct1, best: true, sortable: true, group: "setlist" },
+  { id: "exact", label: "Exact calls", tip: METRIC_TIPS.exactCalls, value: (m) => m.setlist?.exact_calls ?? null, format: count, group: "setlist" },
+  { id: "marquee", label: "Marquee", tip: METRIC_TIPS.marqueeCalls, value: (m) => m.setlist?.marquee_calls ?? null, format: count, group: "setlist" },
+  { id: "sharp", label: "Sharp", tip: METRIC_TIPS.sharp, value: (m) => m.setlist?.sharpshooters ?? null, format: count, best: true, sortable: true, group: "setlist" },
+  { id: "hit20", label: "Hit·20", tip: hitRateTip(20), value: (m) => m.hit_rate_top20, format: pct1, best: true, sortable: true, group: "shortlist" },
+  { id: "recall", label: "Recall", tip: METRIC_TIPS.recall, value: (m) => m.recall, format: pct1, best: true, sortable: true, group: "shortlist" },
+  { id: "brier", label: "Brier", tip: METRIC_TIPS.brier, value: (m) => m.brier, format: (v) => v.toFixed(3), lowerBetter: true, best: true, sortable: true, group: "shortlist" },
+  { id: "vs_heur", label: "Δ base", tip: METRIC_TIPS.vsHeuristic, value: (m) => m.vs_heuristic?.hit_rate_top20_delta ?? null, format: formatSignedPct, signed: true, best: true, sortable: true, group: "shortlist" },
+  { id: "refresh", label: "Refresh", tip: METRIC_TIPS.refreshGain, value: (m) => m.refresh_gain?.mean_hit_rate_top20_delta ?? null, format: formatSignedPct, signed: true, best: true, sortable: true, group: "shortlist" },
+  { id: "list", label: "List", tip: METRIC_TIPS.list, value: (m) => m.avg_n_rows, format: (v) => v.toFixed(1), group: "shortlist" },
+  { id: "shows", label: "Shows", tip: METRIC_TIPS.shows, value: (m) => m.n_shows, format: count, group: "shortlist" },
 ];
 
-const SORTABLE = METRICS.filter((d) => d.sortable);
-
-// Detail grid order: setlist-call metrics first, then shortlist metrics,
-// then context (List/Shows last — they're denominators, not scores).
-const DETAIL_ORDER = [
-  "setlist", "placed", "weighted", "exact", "marquee", "sharp",
-  "hit20", "recall", "brier", "vs_heur", "refresh", "list", "shows",
+const GROUPS = [
+  { id: "setlist" as const, label: "Setlist call" },
+  { id: "shortlist" as const, label: "Shortlist" },
 ];
-const DETAIL = DETAIL_ORDER.map((id) => METRICS.find((d) => d.id === id)!);
 
 // A metric label whose definition pops on hover/tap — same affordance as the
 // scores band's TipLabel, kept visible in the redesign per user ask.
@@ -73,7 +73,7 @@ interface StandingsBoardProps {
  *  replaces the old 12-column table so standings read without horizontal
  *  scrolling on any viewport. */
 export default function StandingsBoard({ models }: StandingsBoardProps) {
-  const [sortId, setSortId] = useState("setlist");
+  const [sortId, setSortId] = useState("weighted");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -137,28 +137,36 @@ export default function StandingsBoard({ models }: StandingsBoardProps) {
         metric to rank by, tap a model for the full breakdown.
       </div>
 
-      <div className="standings-chips">
-        {SORTABLE.map((def) => {
-          const active = def.id === sortId;
-          return (
-            <StatPopover
-              key={def.id}
-              trigger={
-                <button
-                  type="button"
-                  className={"standings-chip" + (active ? " active" : "")}
-                  aria-pressed={active}
-                  onClick={() => onSort(def)}
-                >
-                  {def.label}
-                  {active ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
-                </button>
-              }
-            >
-              <div className="stat-pop-line">{def.tip}</div>
-            </StatPopover>
-          );
-        })}
+      <div className="standings-chip-groups">
+        {GROUPS.map((group) => (
+          <div className="standings-chip-group" key={group.id}>
+            <div className="metric-group-label">{group.label}</div>
+            <div className="standings-chips">
+              {METRICS.filter((d) => d.sortable && d.group === group.id).map((def) => {
+                const active = def.id === sortId;
+                return (
+                  <button
+                    key={def.id}
+                    type="button"
+                    className={"standings-chip" + (active ? " active" : "")}
+                    aria-pressed={active}
+                    onClick={() => onSort(def)}
+                  >
+                    {def.label}
+                    {active ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* The selected metric's definition, inline rather than a popover —
+          the chip tips kept covering the standings on tap (mobile
+          especially), so the active one reads here instead. */}
+      <div className="standings-active-tip" aria-live="polite">
+        {activeDef.tip}
       </div>
 
       <div className="standings-cards">
@@ -194,24 +202,31 @@ export default function StandingsBoard({ models }: StandingsBoardProps) {
               </button>
               {open && (
                 <div className="mcard-detail">
-                  {DETAIL.map((def) => {
-                    const v = def.value(m);
-                    const isBest =
-                      def.best && v !== null && bestByMetric.get(def.id) === v;
-                    return (
-                      <div className="mcard-metric" key={def.id}>
-                        <MetricTip def={def} />
-                        <span className={"mcard-metric-val " + valClass(def, v)}>
-                          {v === null ? "—" : def.format(v)}
-                          {isBest && (
-                            <span className="best-mark" title="best in field">
-                              {" "}◆
-                            </span>
-                          )}
-                        </span>
+                  {GROUPS.map((group) => (
+                    <div key={group.id}>
+                      <div className="metric-group-label">{group.label}</div>
+                      <div className="mcard-metric-grid">
+                        {METRICS.filter((d) => d.group === group.id).map((def) => {
+                          const v = def.value(m);
+                          const isBest =
+                            def.best && v !== null && bestByMetric.get(def.id) === v;
+                          return (
+                            <div className="mcard-metric" key={def.id}>
+                              <MetricTip def={def} />
+                              <span className={"mcard-metric-val " + valClass(def, v)}>
+                                {v === null ? "—" : def.format(v)}
+                                {isBest && (
+                                  <span className="best-mark" title="best in field">
+                                    {" "}◆
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

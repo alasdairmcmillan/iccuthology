@@ -5,16 +5,26 @@ import { modelDisplayName, pct1 } from "../lib/format";
 import { METRIC_TIPS, hitRateTip } from "../lib/metricTips";
 import StatPopover from "./StatPopover";
 
-type Metric = "setlist" | "hit20";
+type Metric = "weighted" | "setlist" | "hit20";
+
+// Mirrors the standings board's ordering: weighted setlist score leads,
+// then setlist hit rate, then the shortlist top-20 hit rate.
+const PANEL_METRICS: { id: Metric; label: string; footLabel: string; tip: string }[] = [
+  { id: "weighted", label: "Weighted", footLabel: "weighted setlist score", tip: METRIC_TIPS.setlistWeighted },
+  { id: "setlist", label: "Hit Rate", footLabel: "setlist call hit rate", tip: METRIC_TIPS.setlistHitRate },
+  { id: "hit20", label: "Hit·20", footLabel: "top-20 hit rate", tip: hitRateTip(20) },
+];
 
 interface ModelStandingsPanelProps {
   onOpenScorecards: () => void;
 }
 
-// Setlist hit rate only exists for sources that submitted an ordered call
+// Setlist metrics only exist for sources that submitted an ordered call
 // (§8) — heuristic and any model that hasn't yet does not, and sorts last.
 function metricValue(m: ScoreboardModel, metric: Metric): number | null {
-  return metric === "setlist" ? (m.setlist ? m.setlist.hit_rate : null) : m.hit_rate_top20;
+  if (metric === "weighted") return m.setlist?.weighted_score ?? null;
+  if (metric === "setlist") return m.setlist?.hit_rate ?? null;
+  return m.hit_rate_top20;
 }
 
 /** Compact model leaderboard for the Tours page sidebar (above the schedule
@@ -24,7 +34,7 @@ function metricValue(m: ScoreboardModel, metric: Metric): number | null {
 export default function ModelStandingsPanel({ onOpenScorecards }: ModelStandingsPanelProps) {
   const [scoreboard, setScoreboard] = useState<Scoreboard | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [metric, setMetric] = useState<Metric>("setlist");
+  const [metric, setMetric] = useState<Metric>("weighted");
 
   // Fetch once on mount — the Tours page is the app's default screen, so
   // this is typically the session's first scoreboard fetch (no mode gate
@@ -59,22 +69,17 @@ export default function ModelStandingsPanel({ onOpenScorecards }: ModelStandings
       <div className="standings-panel-head">
         <span className="label-caps">Model standings</span>
         <div className="mode-toggle mode-toggle-sm" role="tablist" aria-label="Standings metric">
-          <button
-            className={"mode-option" + (metric === "setlist" ? " active" : "")}
-            role="tab"
-            aria-selected={metric === "setlist"}
-            onClick={() => setMetric("setlist")}
-          >
-            Setlist
-          </button>
-          <button
-            className={"mode-option" + (metric === "hit20" ? " active" : "")}
-            role="tab"
-            aria-selected={metric === "hit20"}
-            onClick={() => setMetric("hit20")}
-          >
-            Hit·20
-          </button>
+          {PANEL_METRICS.map((def) => (
+            <button
+              key={def.id}
+              className={"mode-option" + (metric === def.id ? " active" : "")}
+              role="tab"
+              aria-selected={metric === def.id}
+              onClick={() => setMetric(def.id)}
+            >
+              {def.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -113,12 +118,12 @@ export default function ModelStandingsPanel({ onOpenScorecards }: ModelStandings
         <StatPopover
           trigger={
             <span className="tip-label standings-sub">
-              {metric === "setlist" ? "setlist call hit rate" : "top-20 hit rate"}
+              {PANEL_METRICS.find((d) => d.id === metric)!.footLabel}
             </span>
           }
         >
           <div className="stat-pop-line">
-            {metric === "setlist" ? METRIC_TIPS.setlistHitRate : hitRateTip(20)}{" "}
+            {PANEL_METRICS.find((d) => d.id === metric)!.tip}{" "}
             Unweighted mean over each model's scored shows.
           </div>
         </StatPopover>
