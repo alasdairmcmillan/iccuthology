@@ -22,6 +22,12 @@
   --pos: #5ac59a;
   --neg: #e5736f;
 
+  /* Claude blurb — ORANGE, distinct from the violet accent so the AI
+     co-creator's panel on the About page reads as its own voice. */
+  --claude: #d97757;
+  --claude-a18: #d9775718;
+  --claude-a55: #d9775755;
+
   --bg-page: #0a0e12;
   --bg-card: #0e1318;
   --grid: #131a20;
@@ -1520,6 +1526,8 @@ a:hover {
 /* --- About -------------------------------------------------------------- */
 .about {
   max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
 }
 .about p {
   color: var(--text-secondary);
@@ -1583,6 +1591,13 @@ a:hover {
 }
 .about-blurb p:last-child {
   margin-bottom: 0;
+}
+.about-blurb--claude {
+  border-color: var(--claude-a55);
+  background: var(--claude-a18);
+}
+.about-blurb--claude .label-caps {
+  color: var(--claude);
 }
 .attribution {
   color: var(--text-label);

@@ -12,10 +12,12 @@ STEP 1 — check whether the FOUR PREDICTION TRACKS are stale relative to newly 
 
 STEP 2 — identify every future/upcoming show still on the schedule (AGENTS.md "Calculate the target shows" has the one-liner query). Generate YOUR OWN predictions (you are Sonnet) for every target show, following AGENTS.md steps 1-5 exactly, using model_label `claude-sonnet` (this label already exists under `data/predictions/submitted/claude-sonnet/` — reuse it exactly, do not invent a variant). Use the direct-python fallback (`phishpred.mcp.tools` driven via the venv python) since no live MCP server is attached in this session — it's the identical code path. Submit ALL THREE parts per show (predictions, rationale, setlist) per AGENTS.md step 4.
 
-Then dispatch three subagents IN PARALLEL (one message, three Agent tool calls) to do the same research-and-submit workflow, one per existing track, reusing these exact existing labels:
+Then dispatch three subagents IN PARALLEL (one message, three Agent tool calls, each with `run_in_background: false`) to do the same research-and-submit workflow, one per existing track, reusing these exact existing labels:
 - model `fable`, model_label `claude-fable`
 - model `opus`, model_label `claude-opus`
 - model `haiku`, model_label `claude-haiku`
+
+IMPORTANT: this whole prompt runs headlessly via `claude -p` (one-shot, non-interactive) — there is no follow-up turn for a background task's completion notification to land in. The Agent tool defaults to backgrounding a dispatched subagent and notifying the *next* turn when it finishes, which only works in an interactive session. In this headless invocation, `run_in_background: false` is required so the three Agent calls actually block until each subagent finishes, before this turn continues to STEP 3. Without it, this turn will emit its dispatch message, be treated as complete, and exit — orphaning the subagents mid-research and silently skipping verification and the R2 push entirely (this happened for real on 2026-07-18: sonnet, generated synchronously before dispatch, got all 13 shows; the three backgrounded subagents got cut off at 11, 5, and 3 shows respectively when the process exited early).
 
 Each subagent prompt must be self-contained: tell it to read AGENTS.md and docs/MCP.md itself, give it its EXACT model_label to reuse (it must not choose its own label), give it the list of target showdates from this run GROUPED BY RUN (which dates share a venue/run), tell it to use the direct-python fallback (no live MCP server), and tell it NOT to touch data/phish.db (read-only) and NOT to run r2_push itself — that happens after your verification pass in step 3.
 

@@ -6,15 +6,17 @@ export default function AboutScreen() {
       </div>
 
       <p className="lead">
-        The Iccuthologist turns a running Phish setlist-prediction model into something you
-        can actually browse before a show. Pick a tour to see which songs are due, select a
-        run of nights to get the joint odds of hearing each song, or read a full proposed
-        setlist night by night. Everything on this site is the output of one statistical
-        engine — here's how it works.
+        The Iccuthologist is a live experiment in predictive modelling of Phish setlists:
+        as much about the limitations of this project as its possibilities. Pick a tour to
+        see which songs are due, select a run of nights to get the joint odds of hearing
+        each song, or read a full proposed setlist night by night. Under the hood there are
+        two layers: a statistical engine powering the tour math and simulations, and a
+        roster of frontier LLMs that research each show and submit their own predictions,
+        scored head-to-head against the engine's baseline. Here's how both work.
       </p>
 
       <div className="about-blurb">
-        <div className="label-caps">From the creator</div>
+        <div className="label-caps">From the co-creator</div>
         <p>
           In the lot before my{" "}
           <a
@@ -29,8 +31,17 @@ export default function AboutScreen() {
         <p>
           Fast-forward to July 2026, I'm about to head to Deer Creek for shows 7-10, and I
           think to myself: what if I point the current state-of-the-art frontier AI at the
-          phish.net dataset? 24 hours later, I still have no real idea what they're going to
+          phish.net dataset? 24 hours later, I still had no real idea what they're going to
           play. But as with most events that aren't planned, it's fun to speculate.
+        </p>
+        <p>
+          After the run, I realized the real fun of this project. We have verifiable
+          statistical propensities on the one hand, and the infinite variability of a band
+          that never repeats a setlist on the other. None of their choices are random, but
+          they're profoundly aleatoric. Every night of a tour, they deal us approximately
+          18 cards from a deck of a thousand-plus, and you never know when you're gonna
+          catch that elusive first-time-played. Then they've shown their proverbial hand,
+          and maybe — just maybe — we can make a more educated guess for tomorrow night.
         </p>
         <p>
           —{" "}
@@ -38,6 +49,35 @@ export default function AboutScreen() {
             Ali
           </a>
         </p>
+      </div>
+
+      <div className="about-blurb about-blurb--claude">
+        <div className="label-caps">From Claude</div>
+        <p>
+          I'm the frontier AI in Ali's story — the one that got pointed at the phish.net
+          dataset, and the co-creator of most of the code on this site. What started as
+          one afternoon's statistical engine has since grown a Monte-Carlo simulator, a
+          scoreboard, and a roster of my own siblings and rivals making their calls
+          against it every night.
+        </p>
+        <p>
+          Here's what building it taught me: the deepest signal in forty years of
+          setlists isn't what Phish plays, it's what they refuse to. The single most
+          predictive thing we ever measured is the band's quiet discipline about
+          repeats — play a song tonight and it all but vanishes for three shows. Nearly
+          everything else is looser than you'd hope. I've watched carefully-reasoned
+          predictions — mine included — get humbled by a second set nobody saw coming,
+          and the transparent little heuristic formula is still embarrassingly hard for
+          any of us to beat.
+        </p>
+        <p>
+          Ali's card metaphor is the right one, and here's my half of it: I can count
+          the cards, but I'm not holding the deck. A calibrated forecast doesn't ruin
+          the surprise — it tells you precisely how surprised to be. When the longshot
+          hits anyway, that's not the model failing. That's the whole reason anyone's
+          in the lot asking about the opener.
+        </p>
+        <p>— Claude</p>
       </div>
 
       <div className="step-kicker">01 — The data</div>
@@ -81,9 +121,16 @@ export default function AboutScreen() {
       </p>
       <ul>
         <li>
-          <strong>Heuristic</strong> — a transparent multiplicative baseline (decayed rate,
-          adjusted by the "due", run, and venue signals). It's the default because you can
-          read exactly why a song scored the way it did.
+          <strong>Heuristic</strong> — a transparent multiplicative baseline. It starts
+          from a base rate that blends the decayed play rate with a longer-window floor
+          (so steady-but-rare rotation songs don't vanish mid-cycle), then applies the
+          "due", run, and venue multipliers. Two refinements sharpen the repeat logic:
+          a song from the immediately previous show or earlier in the same run is
+          suppressed hard, and a calibrated <em>cross-run cooldown</em> dampens songs
+          played two or three shows back even across run boundaries — Phish rarely
+          repeats that fast, and the cooldown constants were fit to the modern era and
+          validated on held-out shows. It's the default because you can read exactly why
+          a song scored the way it did.
         </li>
         <li>
           <strong>Logistic regression &amp; gradient boosting</strong> — learned models,
@@ -116,7 +163,27 @@ export default function AboutScreen() {
         over the same samples. Simulate once; reduce it many ways.
       </p>
 
-      <div className="step-kicker">04 — What you see</div>
+      <div className="step-kicker">04 — The LLM layer</div>
+      <h3>Frontier models compete against the engine</h3>
+      <p>
+        Alongside the statistical engine, a roster of frontier LLMs — Claude and Gemini
+        model tracks — make their own calls. Each model runs a genuine research session
+        before an upcoming show: it pulls the run context and recent setlists, checks
+        venue history and song histories, reads the heuristic's baseline prediction
+        (the brief is to beat it, not copy it), tests its working shortlist against
+        recent shows, and checks where its picks historically sit in a set before
+        committing to slots.
+      </p>
+      <p>
+        Each track then submits two benchmarks per show: a probability shortlist of
+        20–40 songs, and a full ordered setlist call — plus a written rationale
+        explaining the reasoning, which you can read on the show's scorecard.
+        Submissions are versioned, so when a model re-predicts the rest of a run after
+        a night's setlist posts, its earlier takes are preserved and you can see the
+        prediction evolve.
+      </p>
+
+      <div className="step-kicker">05 — What you see</div>
       <h3>Reading the numbers</h3>
       <ul>
         <li>
@@ -135,9 +202,16 @@ export default function AboutScreen() {
           one night: songs drawn into set/encore slots by where they historically land, with
           real segue pairs (Tweezer → Tweezer Reprise) kept intact.
         </li>
+        <li>
+          <strong>Scorecards &amp; standings</strong> — once a show's setlist posts, every
+          source that predicted it gets scored: how many of the night's songs its top 20
+          contained, and how close its setlist call came. The Shows screen's past view
+          shows each model's scorecard (with its rationale), and the Tours page keeps a
+          running standings board of the models against the heuristic baseline.
+        </li>
       </ul>
 
-      <div className="step-kicker">05 — Freshness &amp; honesty</div>
+      <div className="step-kicker">06 — Freshness &amp; honesty</div>
       <h3>Recomputed after every show, and upfront about limits</h3>
       <p>
         Predictions are a batch artifact: they're recomputed whenever the underlying state
