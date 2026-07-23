@@ -7,14 +7,12 @@ from phishpred.probs import renormalize_to_k
 
 def get_rationales():
     return {
-        "2026-07-21": "Kicking off the next leg at Lakeview, we focus heavily on due heavy-hitters. Coming off the Merriweather run, we discount the most recent plays to respect tour rotation and aim for a classic outdoor amphitheater vibe.",
-        "2026-07-22": "Opening the massive 5-night MSG run, we prioritize songs that set the tone for the residency. We expect big jam vehicles early in the run but hold back some staples for later nights. MSG always brings high-energy openers.",
-        "2026-07-24": "Night 2 at MSG historically dives deeper into the catalog. We explicitly avoid any songs played on Night 1, shifting focus to groove-heavy tracks that thrive indoors.",
-        "2026-07-25": "The Saturday night of the MSG run is typically explosive. We discount all tracks played over the first two nights, opening the door for massive crowd-pleasers and high-octane set closers.",
-        "2026-07-27": "Deep into the residency, Night 4 often features rarer cuts and exploratory second sets. Our probabilities heavily discount the first three nights, focusing on remaining catalog staples that are overdue for an appearance.",
-        "2026-07-29": "The finale of the 5-night MSG stand. The available pool of high-rotation songs is significantly depleted by now, so we allocate probabilities to remaining heavy-hitters and expect a triumphant, celebratory encore.",
-        "2026-07-31": "Moving to Boston for a stadium show, the band usually goes for grand, echoing anthems. We reset our run exclusions since it's a new venue, but still honor standard tour rotation from the MSG finale.",
-        "2026-08-01": "Closing out the Boston stop, we avoid Night 1's setlist and predict a high-energy Saturday stadium show. The probability mass shifts to remaining heavy rotation staples and classic rock elements.",
+        "2026-07-24": "Now that Night 1 at MSG has set the tone and taken some heavy hitters off the board, Night 2 typically dives deeper into groove-oriented vehicles. We explicitly exclude the songs played on the 22nd and focus on tracks that thrive in the indoor MSG environment.",
+        "2026-07-25": "It's Saturday night at MSG. With the first two nights of the residency completed (one actual, one simulated by our model), we expect high-energy crowd pleasers and major set-closing anthems to dominate.",
+        "2026-07-27": "Deep into the residency, Night 4 often brings rarer cuts and exploratory second sets. Our probabilities heavily discount all prior nights in the run, focusing on remaining catalog staples that are now significantly overdue.",
+        "2026-07-29": "The grand finale of the 5-night MSG stand. The available pool of high-rotation songs is significantly depleted, so we allocate probabilities to remaining heavy-hitters and expect a triumphant, celebratory encore.",
+        "2026-07-31": "Moving to Boston for a stadium show at Fenway, the band usually goes for grand, echoing anthems. We reset our run exclusions since it's a new venue, but still honor standard tour rotation from the MSG finale.",
+        "2026-08-01": "Closing out the Boston stop on a Saturday night, we avoid Night 1's setlist and predict a high-energy stadium show. The probability mass shifts to remaining heavy rotation staples and classic rock elements.",
         "2026-09-04": "The traditional Labor Day weekend at Dick's always brings a unique energy. After a month-long break since Fenway, rotation is completely reset. We expect a statement opener and heavily weigh fan-favorites.",
         "2026-09-05": "Saturday night at Dick's is historically one of the most anticipated shows of the year. We eliminate Night 1's songs and lean into deep, dark jam vehicles for the second set.",
         "2026-09-06": "The summer tour finale at Dick's. With the first two nights excluded, the pool is primed for the remaining biggest anthems. We project an emotional closer and a multi-song encore to cap off the summer."
