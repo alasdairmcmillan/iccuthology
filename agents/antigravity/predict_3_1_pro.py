@@ -19,7 +19,7 @@ def build_predictions_for_gemini_3_1_pro_high():
     predicted_setlists = {}
     upcoming = sorted(upcoming, key=lambda x: x["showdate"])
     
-    model_label = "gemini-3.1-pro-high"
+    model_label = "gemini-pro"
     
     # Custom Rationales for 3.1 Pro High reasoning
     base_rationales = {

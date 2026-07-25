@@ -22,8 +22,8 @@ def build_predictions_for_all_shows():
     # Process shows in chronological order
     upcoming = sorted(upcoming, key=lambda x: x["showdate"])
     
-    model_label = "gemini-3.1-pro-high"
-    
+    model_label = "gemini-pro"
+
     for i, show in enumerate(upcoming):
         showdate = show["showdate"]
         print(f"\n--- Processing showdate: {showdate} ({show['venue_name']}) ---")
@@ -186,7 +186,7 @@ def build_predictions_for_all_shows():
         
         predicted_setlists[showdate] = set1 + set2 + encore
         
-        # 9. Rationale generation for gemini-3.1-pro-high
+        # 9. Rationale generation for gemini-pro
         nights_in_run_count = len(run_nights)
         run_position_index = next((idx + 1 for idx, n in enumerate(run_nights) if n["showdate"] == showdate), 1)
         venue_short = venue_name.split(" at ")[0].split(" - ")[0]
@@ -195,7 +195,7 @@ def build_predictions_for_all_shows():
         
         boosted_songs = [c["song_name"] for c in shortlist_candidates if c.get("is_venue_boosted", False)]
         
-        rationale = f"As gemini-3.1-pro-high, we approach this "
+        rationale = f"As gemini-pro, we approach this "
         if nights_in_run_count > 1:
             rationale += f"Night {run_position_index} of {nights_in_run_count} at {venue_short} with strict joint consistency."
         else:

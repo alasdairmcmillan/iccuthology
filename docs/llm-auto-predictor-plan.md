@@ -40,7 +40,7 @@ Key insight from the 2026-07-11 session: the pipeline is already reactive —
 `submitted_manifest_hash` is in the epoch key, so any new/updated submission
 file triggers republish → refold → refreeze. The ONLY missing piece is the
 thing that *generates* submissions automatically. Also note:
-`scripts/make_predictions.py` ("gemini-3.5-flash-high") is a static formula,
+`scripts/make_predictions.py` ("gemini-flash", née "gemini-3.5-flash-high") is a static formula,
 NOT an API caller — real API clients already exist in
 `src/phishpred/models/llm.py` (Anthropic/Gemini/OpenAI, structured JSON,
 disk cache, prompt builder).
@@ -133,7 +133,10 @@ Secrets: `ANTHROPIC_API_KEY` already exists in the workflow; **add
   our volume is single digits/day). `GeminiClient` defaults to
   `gemini-2.5-flash`; always pass the id explicitly.
 - Keep the historical hand-driven labels (`claude-fable`, `claude-sonnet`,
-  `gemini-3-5-flash-high`) untouched; they remain scored as-is.
+  `gemini-flash` — note this is the `mcp:gemini-flash` hand-driven track,
+  a different source-key namespace than this plan's `llm:google:...` one
+  above; a naming coincidence, not a collision) untouched; they remain
+  scored as-is.
 
 ### Cost envelope (sized 2026-07-11 from llm.py's prompt)
 

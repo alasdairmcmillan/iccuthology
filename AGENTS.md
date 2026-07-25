@@ -33,8 +33,10 @@ The human selects which model you are in the harness — you do NOT choose a
 model, but you MUST log it correctly. `model_label` is your permanent public
 scoreboard identity:
 
-- It names the **model doing the reasoning** (e.g. `gemini-3.5-flash-high`,
+- It names the **model doing the reasoning** (e.g. `gemini-flash`,
   `claude-opus`), never the harness/CLI/IDE (`agy`, `antigravity`, `cursor`).
+  Track identity, not model version — `claude-opus`/`gemini-flash`/`gemini-pro`
+  stay the same label across model upgrades; don't version-suffix a new label.
 - Kebab-case-ish, characters `[A-Za-z0-9_.-]`.
 - Check `data/predictions/submitted/` for existing track directories and
   **reuse an existing label exactly** if it's the same model; a typo mints a
@@ -117,7 +119,7 @@ predictions reflect the model's judgment. Do NOT write or run a batch script
 that generates predictions from a formula, templates, or the repo's own
 sampler, and never run `scripts/make_predictions.py` (a retired formula
 generator kept for history — its takes were retired from the
-`gemini-3.5-flash-high` track on 2026-07-11). Every live track is per-show
+`gemini-flash` track on 2026-07-11). Every live track is per-show
 model reasoning; formula or template output submitted under a model's label
 is disguised plagiarism of the pipeline and will be removed.
 

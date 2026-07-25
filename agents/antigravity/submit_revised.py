@@ -8,7 +8,7 @@ def main():
     conn = get_connection("data/phish.db")
     draft_dir = Path("tmp/drafts")
     out_dir = Path("data/predictions/submitted")
-    model_label = "gemini-3.5-flash-high"
+    model_label = "gemini-flash"
     
     rationales = {
         "2026-07-18": "We kick off the two-night run at Merriweather Post Pavilion with a highly classic-leaning selection. Since key tour workhorses like Harry Hood, Fuego, Golgi, and Llama were played just last night in Raleigh, they are heavily discounted to respect tour rotation. Instead, we anchor the first night around an open Runaway Jim, followed by a strong Set 2 opening Down with Disease, transitioning into the classic Mike's Song -> Weekapaug Groove pairing, and closing Set 2 with a monumental You Enjoy Myself.",
