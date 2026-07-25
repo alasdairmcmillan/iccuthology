@@ -1859,12 +1859,24 @@ a:hover {
 
 /* Mobile scorecard: the 320px floor above keeps .shows-card from being
    crushed in the flex-wrap .shows-row at mid widths, but on narrow phones
-   it just pushes the card past the viewport. Drop it here — the run-grid's
-   own 460px floor still forces the intended sideways scroll inside the
-   card via .shows-card's overflow-x: auto. */
+   it just pushes the card past the viewport. Drop it here. */
 @media (max-width: 640px) {
   .shows-card {
     min-width: 0;
+  }
+}
+
+/* Mobile run view: no sideways scroll — drop Most likely night, keep
+   Song | P(>=1 in run), same as the personal/tour grids' pattern. */
+@media (max-width: 640px) {
+  .run-grid-head,
+  .run-grid-row {
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr) 90px;
+  }
+  .run-grid-head span:nth-child(3),
+  .run-grid-row .run-night {
+    display: none;
   }
 }
 
