@@ -26,7 +26,7 @@ def run_prediction():
         print("No upcoming shows.")
         return
         
-    model_label = "gemini-3.1-pro-high"
+    model_label = "gemini-pro"
     predicted_setlists = {}
     rationales = get_rationales()
     

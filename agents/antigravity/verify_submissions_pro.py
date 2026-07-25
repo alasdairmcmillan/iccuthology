@@ -2,8 +2,8 @@ import json
 from pathlib import Path
 
 def main():
-    label = "gemini-3.1-pro-high"
-    sub_dir = Path("data/predictions/submitted") / "gemini-3-1-pro-high"
+    label = "gemini-pro"
+    sub_dir = Path("data/predictions/submitted") / "gemini-pro"
     
     if not sub_dir.exists():
         print(f"Directory {sub_dir} does not exist.")

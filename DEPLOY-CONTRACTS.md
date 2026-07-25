@@ -505,7 +505,7 @@ lists are valid). The played set is the show's DISTINCT performed slugs.
       "setlist_score": null,      // see below; null when the frozen source has no setlist (it sits out)
       "versions": [ ... ]         // see below; absent/empty when only one take exists
     }
-    // "mcp:claude-fable", "mcp:gemini-3.5-flash-high", ...: same shape; mcp
+    // "mcp:claude-fable", "mcp:gemini-flash", ...: same shape; mcp
     // sources keep their frozen "rationale"/"submitted_at" fields verbatim.
   },
   "missed_by_all": [{"slug": "...", "song": "..."}]  // played songs in NO source's shortlist

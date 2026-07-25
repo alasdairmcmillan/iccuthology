@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-sub_dir = Path("data/predictions/submitted/gemini-3-6-flash-high")
+sub_dir = Path("data/predictions/submitted/gemini-flash")
 assert sub_dir.exists(), f"Directory {sub_dir} does not exist!"
 
 files = sorted(list(sub_dir.glob("*.json")))
@@ -12,7 +12,7 @@ for f in files:
     data = json.loads(f.read_text(encoding="utf-8"))
     
     # 1. Model label check
-    assert data["model_label"] == "gemini-3.6-flash-high", f"Label mismatch in {f.name}: {data.get('model_label')}"
+    assert data["model_label"] == "gemini-flash", f"Label mismatch in {f.name}: {data.get('model_label')}"
     
     # 2. Setlist sets key check
     assert "setlist" in data and "sets" in data["setlist"], f"Missing setlist.sets in {f.name}"

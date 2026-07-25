@@ -1,7 +1,7 @@
 import os
 import json
 
-sub_dir = "data/predictions/submitted/gemini-3-5-flash-high"
+sub_dir = "data/predictions/submitted/gemini-flash"
 
 target_shows = [
     "2026-07-21.json",
@@ -33,7 +33,7 @@ def verify():
         sets_keys = list(setlist.get("sets", {}).keys()) if setlist else None
         print(f"  {fn}: label={label}, showdate={showdate}, preds_count={len(preds)}, setlist_sets={sets_keys}")
         
-        assert label == "gemini-3.5-flash-high", f"Bad label: {label}"
+        assert label == "gemini-flash", f"Bad label: {label}"
         assert setlist and "sets" in setlist, f"Missing setlist: {fn}"
         assert rationale, f"Missing rationale: {fn}"
         assert rationale not in rationales, f"Duplicate rationale found in {fn}"

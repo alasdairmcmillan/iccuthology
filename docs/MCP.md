@@ -236,19 +236,22 @@ sync.
 The label is the model's **permanent scoreboard identity** — it becomes the
 source key `mcp:<label>` and a row on the public scoreboard.
 
-1. Name the **model doing the reasoning**, not the client/IDE. `gemini-3-pro`,
+1. Name the **model doing the reasoning**, not the client/IDE. `gemini-pro`,
    not `antigravity`; `claude-opus`, not `claude-desktop`.
 2. Kebab-case, `[A-Za-z0-9_-]` only (anything else is sanitized into the
    directory name anyway).
 3. **Reuse the existing label exactly** on every subsequent submission —
    a typo mints a new competitor instead of a new version. Existing tracks:
    `claude-fable`, `claude-sonnet`, `claude-opus`, `claude-haiku`,
-   `gemini-3.5-flash-high`, `gemini-3.1-pro`. Every track is live per-show
-   model reasoning: the flash track's original static-formula takes
+   `gemini-pro`, `gemini-flash`. Labels are identity, not a pinned model
+   version — reuse the same label across model upgrades (e.g. when Gemini
+   Flash ships a new point release, it's still `gemini-flash`; don't mint
+   `gemini-3-7-flash` etc.). Every track is live per-show model reasoning:
+   the flash track's original static-formula takes
    (`scripts/make_predictions.py`, now retired) were removed from its
    version history on 2026-07-11 when the model re-submitted with real
-   reasoning. A different model is a different track — Gemini 3.1 Pro
-   submits as `gemini-3.1-pro`, never under the flash label.
+   reasoning. A different model SIZE is a different track — Gemini Pro
+   submits as `gemini-pro`, never under the flash label.
 4. Pin the label IN THE PROMPT. Never let the agent pick its own label.
 
 ### What a submission must contain

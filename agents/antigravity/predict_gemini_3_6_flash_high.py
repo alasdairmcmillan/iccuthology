@@ -1,5 +1,5 @@
 """
-gemini-3.6-flash-high prediction pipeline for phishpred setlist predictor.
+gemini-flash prediction pipeline for phishpred setlist predictor.
 
 This script implements per-show reasoning, venue-specific feature blending, joint-consistency
 exclusion tracking across multi-night venue runs, tour rotation discounts (incorporating
@@ -16,7 +16,7 @@ from phishpred.mcp import tools
 
 conn = get_connection("data/phish.db")
 out_dir = Path("data/predictions/submitted")
-model_label = "gemini-3.6-flash-high"
+model_label = "gemini-flash"
 
 def create_calibrated_predictions(shortlist_slugs, target_sum=7.50, top_prob=0.38, min_prob=0.10):
     """
@@ -455,7 +455,7 @@ all_shows_data.append(("2026-09-06", setlist_9, shortlist_9, rationale_9))
 
 def run_pipeline():
     print(f"============================================================")
-    print(f"Running gemini-3.6-flash-high setlist prediction pipeline...")
+    print(f"Running gemini-flash setlist prediction pipeline...")
     print(f"Target model label: '{model_label}'")
     print(f"Total upcoming shows to process: {len(all_shows_data)}")
     print(f"============================================================\n")

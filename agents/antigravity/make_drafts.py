@@ -24,7 +24,7 @@ def build_drafts_for_all_shows():
     # Process shows in chronological order
     upcoming = sorted(upcoming, key=lambda x: x["showdate"])
     
-    model_label = "gemini-3.5-flash-high"
+    model_label = "gemini-flash"
     draft_dir = Path("tmp/drafts")
     draft_dir.mkdir(parents=True, exist_ok=True)
     

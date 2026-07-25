@@ -1,13 +1,18 @@
 # GEMINI.md — Standing instructions for Gemini prediction runs
 
-This file outlines the custom prediction pipelines built for the Gemini tracks (`gemini-3.5-flash-high` and `gemini-3.6-flash-high`) in the `phishpred` setlist predictor.
+This file outlines the custom prediction pipelines built for the Gemini
+tracks (`gemini-pro` and `gemini-flash` — unversioned identity labels, not
+pinned to a model release) in the `phishpred` setlist predictor. The scripts
+below still carry their original version-numbered filenames from when the
+labels were versioned (2026-07-25 relabel); the filenames are historical,
+the `model_label` values inside them are the current unversioned ones.
 
 ## Workspace Layout
 All code, scripts, and stats live in `agents/antigravity/`:
-- `predict_gemini_3_5_flash_high.py`: Core prediction pipeline for `gemini-3.5-flash-high`.
-- `predict_gemini_3_6_flash_high.py`: Core prediction pipeline for `gemini-3.6-flash-high`.
-- `verify_submissions.py`: Local submission verification script for `gemini-3.5-flash-high` and `gemini-3.6-flash-high`.
-- `verify_submissions_gemini_3_6.py`: Specific verification script for `gemini-3.6-flash-high`.
+- `predict_gemini_3_5_flash_high.py`: Core prediction pipeline for `gemini-flash`.
+- `predict_gemini_3_6_flash_high.py`: Core prediction pipeline for `gemini-flash`.
+- `verify_submissions.py`: Local submission verification script for `gemini-flash`.
+- `verify_submissions_gemini_3_6.py`: Verification script for `gemini-flash`.
 
 ## The Prediction Pipelines
 To regenerate predictions after new setlists are posted, run:

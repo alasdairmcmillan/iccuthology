@@ -24,7 +24,7 @@ RATIONALES = {
     "2026-09-06": "Closing out the summer tour at Dick's. The model heavily penalizes the pool of songs played on nights 1 and 2, zeroing in on the tour's remaining due staples and reliable summer closers."
 }
 
-def build_predictions_for_show(conn, showdate, model_label="gemini-3.1-pro-high"):
+def build_predictions_for_show(conn, showdate, model_label="gemini-pro"):
     print(f"\n--- Processing showdate: {showdate} ---")
     
     heur = tools.heuristic_prediction(conn, showdate)

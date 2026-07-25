@@ -62,7 +62,7 @@ def build_predictions_pro():
     upcoming = sorted(shows_res.get("shows", []), key=lambda x: x["showdate"])
     
     predicted_setlists = {}
-    model_label = "gemini-3.1-pro-high"
+    model_label = "gemini-pro"
     
     for i, show in enumerate(upcoming):
         showdate = show["showdate"]
