@@ -201,6 +201,10 @@ export default function ShowsScreen({
   // ranking, and 20 lines up with the standard top-20 hit-rate window.
   const [shortlistPage, setShortlistPage] = useState(0);
   const [shortlistPageRows] = useState(20);
+  // Pager for the upcoming-show shortlist panel, split out from the setlist
+  // card into its own panel — same 20-row window as the past-mode shortlist.
+  const [upcomingShortlistPage, setUpcomingShortlistPage] = useState(0);
+  const [upcomingShortlistPageRows] = useState(20);
 
   // Dismiss the night picker on outside click or Escape.
   useEffect(() => {
@@ -418,6 +422,12 @@ export default function ShowsScreen({
     ? showsByDate[activeNight]?.sources[model] ?? null
     : null;
 
+  // Reset the shortlist pager whenever the night or model changes so a
+  // 20–40 row list never opens mid-way through.
+  useEffect(() => {
+    setUpcomingShortlistPage(0);
+  }, [activeNight, model]);
+
   return (
     <>
       {/* Toolbar band: one 43px control row in BOTH modes — the "Build your
@@ -617,8 +627,8 @@ export default function ShowsScreen({
               ) : (
                 <>
                   {/* A structured setlist call (§2/§5) is a stronger prediction than
-                      the flat ranked shortlist — prefer it when present, and keep the
-                      shortlist below for the full picture. */}
+                      the flat ranked shortlist — prefer it when present. The
+                      shortlist itself lives in its own panel, CARD C below. */}
                   {sourceForNight!.setlist &&
                     orderSetKeys(Object.keys(sourceForNight!.setlist.sets)).map((key) => (
                       <div className="set-section" key={key}>
@@ -631,29 +641,53 @@ export default function ShowsScreen({
                         ))}
                       </div>
                     ))}
-                  {/* The model's own narrative sits between the setlist call and the
-                      shortlist — it frames both without leading the card. */}
+                  {/* The model's own narrative sits below the setlist call — it
+                      frames the shortlist panel that follows without leading it. */}
                   {sourceForNight!.rationale && (
                     <div className="rationale">
                       <span className="rationale-kicker">Rationale</span>
                       <p className="rationale-body">{sourceForNight!.rationale}</p>
                     </div>
                   )}
-                  <div className="set-section">
-                    <div className="set-label">Predicted songs · P(played)</div>
-                    {sourceForNight!.rows.map((r, i) => (
-                      <div className="set-song" key={r.slug}>
-                        <span className="set-idx">{i + 1}</span>
-                        <span className="set-name">{r.song}</span>
-                        <span className="set-pct">{pct1(r.prob)}</span>
-                      </div>
-                    ))}
-                  </div>
                 </>
               )}
             </div>
           )}
         </div>
+
+        {/* CARD C: MODEL SHORTLIST — split out from the setlist card above so
+            the ranked P(played) list reads as its own panel, same position in
+            the row as the past-scorecards shortlist card. */}
+        {!modelHasSetlist && sourceForNight && sourceForNight.rows.length > 0 && (
+          <div className="card shows-card">
+            <span className="card-title">Predicted songs · P(played)</span>
+            <div className="card-sub" style={{ marginTop: 4, marginBottom: 14 }}>
+              {modelLabel}'s ranked shortlist for {activeNight && dateLabel(activeNight)}
+            </div>
+            <div className="set-section">
+              {sourceForNight.rows
+                .slice(
+                  upcomingShortlistPage * upcomingShortlistPageRows,
+                  (upcomingShortlistPage + 1) * upcomingShortlistPageRows,
+                )
+                .map((r, i) => (
+                  <div className="set-song" key={r.slug}>
+                    <span className="set-idx">
+                      {upcomingShortlistPage * upcomingShortlistPageRows + i + 1}
+                    </span>
+                    <span className="set-name">{r.song}</span>
+                    <span className="set-pct">{pct1(r.prob)}</span>
+                  </div>
+                ))}
+            </div>
+            <Pager
+              page={upcomingShortlistPage}
+              totalRows={sourceForNight.rows.length}
+              pageSize={upcomingShortlistPageRows}
+              onPage={setUpcomingShortlistPage}
+            />
+          </div>
+        )}
       </div>
       </>
       )}
