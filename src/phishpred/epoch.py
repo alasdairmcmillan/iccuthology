@@ -40,6 +40,11 @@ def code_version() -> str:
         out = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=5,
+            # Never let git inherit our stdin. Under the MCP stdio server that
+            # stdin is the client's pipe with a read already pending on it, and
+            # a child git holding the same handle deadlocks before writing any
+            # output -- hanging every tool call that stamps an epoch.
+            stdin=subprocess.DEVNULL,
         )
         sha = out.stdout.strip()
         if out.returncode == 0 and sha:

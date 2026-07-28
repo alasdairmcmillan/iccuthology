@@ -7,15 +7,13 @@ from phishpred.probs import renormalize_to_k
 
 def get_rationales():
     return {
-        "2026-07-24": "Now that Night 1 at MSG has set the tone and taken some heavy hitters off the board, Night 2 typically dives deeper into groove-oriented vehicles. We explicitly exclude the songs played on the 22nd and focus on tracks that thrive in the indoor MSG environment.",
-        "2026-07-25": "It's Saturday night at MSG. With the first two nights of the residency completed (one actual, one simulated by our model), we expect high-energy crowd pleasers and major set-closing anthems to dominate.",
-        "2026-07-27": "Deep into the residency, Night 4 often brings rarer cuts and exploratory second sets. Our probabilities heavily discount all prior nights in the run, focusing on remaining catalog staples that are now significantly overdue.",
-        "2026-07-29": "The grand finale of the 5-night MSG stand. The available pool of high-rotation songs is significantly depleted, so we allocate probabilities to remaining heavy-hitters and expect a triumphant, celebratory encore.",
-        "2026-07-31": "Moving to Boston for a stadium show at Fenway, the band usually goes for grand, echoing anthems. We reset our run exclusions since it's a new venue, but still honor standard tour rotation from the MSG finale.",
-        "2026-08-01": "Closing out the Boston stop on a Saturday night, we avoid Night 1's setlist and predict a high-energy stadium show. The probability mass shifts to remaining heavy rotation staples and classic rock elements.",
-        "2026-09-04": "The traditional Labor Day weekend at Dick's always brings a unique energy. After a month-long break since Fenway, rotation is completely reset. We expect a statement opener and heavily weigh fan-favorites.",
-        "2026-09-05": "Saturday night at Dick's is historically one of the most anticipated shows of the year. We eliminate Night 1's songs and lean into deep, dark jam vehicles for the second set.",
-        "2026-09-06": "The summer tour finale at Dick's. With the first two nights excluded, the pool is primed for the remaining biggest anthems. We project an emotional closer and a multi-song encore to cap off the summer."
+        "2026-07-27": "With massive tentpole jams like Tweezer, DWD, Maze, and Bowie taken off the board in the first three MSG nights, N4 is ripe for You Enjoy Myself, Ghost, and Sand. We heavily discount all prior nights in the run, focusing on remaining catalog staples that are overdue for this residency.",
+        "2026-07-29": "The grand finale of the 5-night MSG stand. The available pool of high-rotation songs is significantly depleted after four nights. We explicitly avoid anything from 7-22 through 7-27 and expect a triumphant, celebratory encore to cap off the residency.",
+        "2026-07-31": "Moving to Boston for a stadium show at Fenway! The rotation is fully reset after the MSG run. We anticipate grand stadium-sized rockers and anthems, heavily weighing standard rotation tracks like Free and Character Zero to match the outdoor energy.",
+        "2026-08-01": "Closing out the Boston stop on a Saturday night. We explicitly avoid Fenway N1's setlist and project a high-energy stadium show, leaning into deep second-set jam vehicles and heavy hitters saved for the closer.",
+        "2026-09-04": "The traditional Labor Day weekend at Dick's always brings a unique energy. After a month-long break since Fenway, rotation is completely reset. We expect a massive statement opener and heavily weigh fan-favorites to kick off the weekend in Commerce City.",
+        "2026-09-05": "Saturday night at Dick's is historically one of the most anticipated shows of the year. We eliminate Dick's N1 songs and lean into deep, dark jam vehicles for the second set, keeping in mind Dick's historic propensity for surprises.",
+        "2026-09-06": "The summer tour finale at Dick's. With the first two nights excluded, the pool is primed for the remaining biggest anthems. We project an emotional closer and a multi-song encore to cap off the summer on a massive high note."
     }
 
 def run_prediction():
