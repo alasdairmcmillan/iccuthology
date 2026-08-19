@@ -1332,6 +1332,38 @@ a:hover {
 .standings-delta.neg {
   color: var(--neg);
 }
+/* Retired tracks (§8 models[*].status). Dimmed and sorted below the live
+   field so the board still reads as a standing, with the record preserved
+   rather than deleted. The tag itself keeps full contrast — the row is muted,
+   not the label explaining why. */
+.mcard.eliminated,
+.standings-panel-row.eliminated {
+  opacity: 0.55;
+}
+.mcard.eliminated:hover,
+.mcard.eliminated.open,
+.standings-panel-row.eliminated:hover {
+  opacity: 0.8;
+}
+.mcard-eliminated-tag,
+.standings-eliminated-tag {
+  border: 1px solid var(--neg);
+  border-radius: 3px;
+  color: var(--neg);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin-left: 6px;
+  padding: 1px 4px;
+  text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+/* The board's tag opens a popover; show it is interactive. */
+.mcard-eliminated-tag {
+  cursor: pointer;
+}
+
 /* Expandable model cards — the mobile-friendly standings detail view. Head
    row: rank / name+kind / headline (active metric) / chevron; expanding
    reveals the full metric breakdown as a reflowing grid. */

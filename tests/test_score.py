@@ -521,6 +521,60 @@ def test_build_scoreboard_omits_setlist_and_refresh_gain_when_absent():
     assert "refresh_gain" not in m   # no multi-take shows
 
 
+def test_build_scoreboard_stamps_track_status():
+    """§8 models[*].status — every entry is stamped, eliminated ones carry why.
+
+    The scoreboard has no static roster (models are discovered from scorecard
+    sources), so retiring a track is a status stamped from phishpred.tracks
+    rather than a removal. Its scored history must survive untouched.
+    """
+    sc = {
+        "showdate": "2026-07-05", "venue_name": "V", "city": "C", "state": "S", "n_played": 20,
+        "sources": {
+            "heuristic": {
+                "kind": "statistical", "n_rows": 40,
+                "metrics": {"hit_rate_top20": 0.5, "recall": 0.4, "brier": 0.1, "log_loss": 0.3},
+            },
+            # The one label eliminated as of 2026-08-18.
+            "mcp:claude-haiku": {
+                "kind": "mcp", "n_rows": 27,
+                "metrics": {"hit_rate_top20": 0.15, "recall": 0.27, "brier": 0.13, "log_loss": 0.4},
+            },
+        },
+    }
+    models = build_scoreboard([sc])["models"]
+
+    # Active tracks are stamped explicitly, so a consumer never has to guess
+    # whether an absent field means active or a pre-field artifact.
+    assert models["heuristic"]["status"] == "active"
+    assert "eliminated_at" not in models["heuristic"]
+    assert "eliminated_reason" not in models["heuristic"]
+
+    gone = models["mcp:claude-haiku"]
+    assert gone["status"] == "eliminated"
+    assert gone["eliminated_at"] == "2026-08-18"
+    assert gone["eliminated_reason"]  # non-empty, renders in the UI popover
+    # Elimination is a status, NOT a deletion — the record stays scoreable.
+    assert gone["n_shows"] == 1
+    assert gone["hit_rate_top20"] == 0.15
+    assert gone["brier"] == 0.13
+
+
+def test_track_status_strips_source_kind_prefix():
+    """Registry is keyed on the bare model_label; scoreboard keys are prefixed."""
+    from phishpred.tracks import bare_label, status_fields
+
+    assert bare_label("mcp:claude-haiku") == "claude-haiku"
+    assert bare_label("llm:claude-haiku") == "claude-haiku"
+    assert bare_label("heuristic") == "heuristic"
+    # Same label reached through either prefix resolves to the same status.
+    assert status_fields("mcp:claude-haiku")["status"] == "eliminated"
+    assert status_fields("llm:claude-haiku")["status"] == "eliminated"
+    # A live track is not accidentally caught by a substring match.
+    assert status_fields("mcp:claude-haiku-v2")["status"] == "active"
+    assert status_fields("mcp:claude-opus")["status"] == "active"
+
+
 def test_build_scoreboard_vs_heuristic_omitted_when_no_paired_shows():
     # mcp:agent is scored on a show where the heuristic is absent -> no pairing.
     sc = {

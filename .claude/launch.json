@@ -9,6 +9,13 @@
       "autoPort": false
     },
     {
+      "name": "web-fixtures",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "web", "run", "dev", "--", "--mode", "fixtures", "--port", "5200", "--strictPort"],
+      "port": 5200,
+      "autoPort": false
+    },
+    {
       "name": "worker",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "worker", "run", "dev", "--", "--port", "8787"],

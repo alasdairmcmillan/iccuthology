@@ -241,8 +241,19 @@ export interface ScoreboardModelVsHeuristic {
   hit_rate_top20_delta: number;
   recall_delta: number;
 }
+/** Track lifecycle (§8). "eliminated" means the track stopped submitting and
+ *  its record is frozen for reference -- the bar is BOTH a really poor scored
+ *  record AND failure to produce genuinely reasoned per-show setlists, so a
+ *  track that merely loses to the baseline stays active. Absent on artifacts
+ *  published before the field existed; api.ts defaults those to "active". */
+export type ScoreboardModelStatus = "active" | "eliminated";
 export interface ScoreboardModel {
   kind: "statistical" | "llm" | "mcp";
+  status?: ScoreboardModelStatus;
+  /** ISO date, present only when status is "eliminated". */
+  eliminated_at?: string;
+  /** One-line public explanation, present only when status is "eliminated". */
+  eliminated_reason?: string;
   n_shows: number;
   hit_rate_top20: number;
   recall: number;
