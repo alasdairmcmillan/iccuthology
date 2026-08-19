@@ -19,6 +19,10 @@ interface ModelStandingsPanelProps {
   onOpenScorecards: () => void;
 }
 
+/** Absent status means a pre-field artifact (api.ts defaults those to
+ *  "active"), so only an explicit value counts as retired. */
+const isEliminated = (m: ScoreboardModel): boolean => m.status === "eliminated";
+
 // Setlist metrics only exist for sources that submitted an ordered call
 // (§8) — heuristic and any model that hasn't yet does not, and sorts last.
 function metricValue(m: ScoreboardModel, metric: Metric): number | null {
@@ -57,6 +61,10 @@ export default function ModelStandingsPanel({ onOpenScorecards }: ModelStandings
     ? Object.entries(scoreboard.models)
         .map(([key, m]) => ({ key, m, value: metricValue(m, metric) }))
         .sort((a, b) => {
+          // Retired tracks sink below the live field, matching StandingsBoard.
+          const ea = isEliminated(a.m) ? 1 : 0;
+          const eb = isEliminated(b.m) ? 1 : 0;
+          if (ea !== eb) return ea - eb;
           if (a.value === null && b.value === null) return 0;
           if (a.value === null) return 1; // missing metric always last
           if (b.value === null) return -1;
@@ -92,12 +100,24 @@ export default function ModelStandingsPanel({ onOpenScorecards }: ModelStandings
       ) : (
         <div className="standings-panel-list">
           {ranked.map(({ key, m, value }, i) => (
-            <div className="standings-panel-row" key={key}>
+            <div
+              className={"standings-panel-row" + (isEliminated(m) ? " eliminated" : "")}
+              key={key}
+            >
               <span className={"standings-rank" + (i === 0 && value !== null ? " lead" : "")}>
                 {i + 1}
               </span>
               <span className="standings-panel-id">
-                <span className="standings-model">{modelDisplayName(key)}</span>
+                <span className="standings-model">
+                  {modelDisplayName(key)}
+                  {/* Compact marker only — the reason lives in the full
+                      standings board's popover, which this panel links to. */}
+                  {isEliminated(m) ? (
+                    <span className="standings-eliminated-tag" title="Eliminated — see full standings">
+                      OUT
+                    </span>
+                  ) : null}
+                </span>
                 {/* n_shows varies per model (not every model submits for every
                     show), so raw ranks aren't apples-to-apples at low sample
                     sizes — surface the count next to every value rather than

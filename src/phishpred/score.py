@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from .epoch import utc_now_iso
+from .tracks import status_fields
 from .modes import _round_floats
 
 # Metrics look at the first N rows for the "top-N" family (§8). Rows in a frozen
@@ -485,6 +486,10 @@ def build_scoreboard(scorecards: list[dict[str, Any]]) -> dict[str, Any]:
                     "hit_rate_top20_delta": _mean(hr_deltas),
                     "recall_delta": _mean(recall_deltas),
                 }
+        # Lifecycle status (§8). Sourced from phishpred.tracks -- the scoreboard
+        # has no static roster, so a retired track is marked here rather than
+        # removed. Its scored history is untouched.
+        entry.update(status_fields(key))
         models[key] = entry
 
     return {"updated_at": utc_now_iso(), "shows": shows, "models": models}

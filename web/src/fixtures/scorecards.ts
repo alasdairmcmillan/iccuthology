@@ -41,7 +41,40 @@ export const genScoreboard: Scoreboard = {
       brier: 0.149,
       log_loss: 0.451,
       avg_n_rows: 23.0,
+      status: "active",
       // The baseline itself carries no vs_heuristic entry.
+    },
+    // An ELIMINATED track (§8 status), so the retired-row treatment is
+    // developable offline: sorts below every active model whatever the metric,
+    // dimmed, tagged, and excluded from the ◆ lead mark. Note the deliberately
+    // BEST (lowest) brier on the board — that is the real artifact this guards
+    // against, since timid under-summed probabilities score well on Brier.
+    "mcp:claude-haiku": {
+      kind: "mcp",
+      n_shows: 2,
+      hit_rate_top20: 0.155,
+      recall: 0.2773,
+      brier: 0.1384,
+      log_loss: 0.38,
+      avg_n_rows: 27.4,
+      status: "eliminated",
+      eliminated_at: "2026-08-18",
+      eliminated_reason:
+        "Last of six tracks on every scored metric, and submitted formula output rather than per-show reasoning: three shows at three different venues shared one identical probability vector, slug list and setlist.",
+      setlist: {
+        n_shows: 2,
+        hit_rate: 0.0868,
+        placed_rate: 0.1,
+        weighted_score: 0.0868,
+        marquee_calls: 1,
+        exact_calls: 0,
+        sharpshooters: 0,
+      },
+      vs_heuristic: {
+        n_shows: 2,
+        hit_rate_top20_delta: -0.07,
+        recall_delta: -0.1309,
+      },
     },
     "mcp:claude-fable": {
       kind: "mcp",

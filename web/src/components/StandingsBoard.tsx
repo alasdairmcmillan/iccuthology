@@ -64,9 +64,29 @@ function MetricTip({ def }: { def: MetricDef }) {
   );
 }
 
+/** ELIMINATED marker: the tag plus why and when, in the same popover
+ *  affordance the metric labels use. The reason ships in the scoreboard
+ *  artifact (phishpred.tracks), not hardcoded here. */
+function EliminatedBadge({ model }: { model: ScoreboardModel }) {
+  const reason = model.eliminated_reason;
+  const at = model.eliminated_at;
+  const tag = <span className="mcard-eliminated-tag">ELIMINATED</span>;
+  if (!reason && !at) return tag;
+  return (
+    <StatPopover trigger={tag}>
+      {at ? <div className="stat-pop-line">Retired {at}</div> : null}
+      {reason ? <div className="stat-pop-line">{reason}</div> : null}
+    </StatPopover>
+  );
+}
+
 interface StandingsBoardProps {
   models: Record<string, ScoreboardModel>;
 }
+
+/** Absent status means an artifact published before the field existed; api.ts
+ *  defaults those to "active", so treat only an explicit value as retired. */
+const isEliminated = (m: ScoreboardModel): boolean => m.status === "eliminated";
 
 /** Past-scorecards standings: a sort-chip row plus one expandable card per
  *  model (rank / name / headline metric, tap for the full breakdown) —
@@ -99,6 +119,12 @@ export default function StandingsBoard({ models }: StandingsBoardProps) {
   const ranked = useMemo(() => {
     const sign = sortDir === "asc" ? 1 : -1;
     return Object.entries(models).sort(([, a], [, b]) => {
+      // Retired tracks sink below every active one whatever the metric — they
+      // are no longer competing, so ranking them among the live field reads as
+      // a standing rather than a record.
+      const ea = isEliminated(a) ? 1 : 0;
+      const eb = isEliminated(b) ? 1 : 0;
+      if (ea !== eb) return ea - eb;
       const va = activeDef.value(a);
       const vb = activeDef.value(b);
       if (va === null && vb === null) return 0;
@@ -114,7 +140,14 @@ export default function StandingsBoard({ models }: StandingsBoardProps) {
     const best = new Map<string, number>();
     for (const def of METRICS) {
       if (!def.best) continue;
+      // Eliminated tracks are excluded from the ◆ lead mark. Brier in
+      // particular rewards timidity — claude-haiku holds the lowest Brier of
+      // every model (0.1384, under the heuristic) purely because its lists
+      // under-summed, one show as low as 2.81. Letting a retired track wear
+      // the lead mark on an artifact of its own bad calibration is worse than
+      // showing no mark at all.
       const vals = Object.values(models)
+        .filter((m) => !isEliminated(m))
         .map((m) => def.value(m))
         .filter((v): v is number => v !== null);
       if (vals.length < 2) continue;
@@ -173,8 +206,9 @@ export default function StandingsBoard({ models }: StandingsBoardProps) {
         {ranked.map(([key, m], i) => {
           const open = expanded.has(key);
           const hv = activeDef.value(m);
+          const gone = isEliminated(m);
           return (
-            <div className={"mcard" + (open ? " open" : "")} key={key}>
+            <div className={"mcard" + (open ? " open" : "") + (gone ? " eliminated" : "")} key={key}>
               <button
                 type="button"
                 className="mcard-head"
@@ -185,7 +219,10 @@ export default function StandingsBoard({ models }: StandingsBoardProps) {
                   {i + 1}
                 </span>
                 <span className="mcard-id">
-                  <span className="mcard-name">{modelDisplayName(key)}</span>
+                  <span className="mcard-name">
+                    {modelDisplayName(key)}
+                    {gone ? <EliminatedBadge model={m} /> : null}
+                  </span>
                   <span className="mcard-kind">
                     {m.kind} · {m.n_shows} {m.n_shows === 1 ? "show" : "shows"}
                   </span>

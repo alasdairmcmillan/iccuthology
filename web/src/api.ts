@@ -146,6 +146,10 @@ function normalizeScoreboard(sb: Scoreboard): Scoreboard {
     if (m.hit_rate_top20 === undefined && m.hit_rate_top10 !== undefined)
       m.hit_rate_top20 = m.hit_rate_top10;
     if (m.avg_n_rows === undefined) m.avg_n_rows = 0;
+    // Artifacts published before the lifecycle field existed carry no status.
+    // They cannot be rewritten retroactively, so default them to active —
+    // build_scoreboard writes it explicitly for every model going forward.
+    if (m.status === undefined) m.status = "active";
     const rg = m.refresh_gain as Loose | undefined;
     if (rg && rg.mean_hit_rate_top20_delta === undefined && rg.mean_hit_rate_top10_delta !== undefined)
       rg.mean_hit_rate_top20_delta = rg.mean_hit_rate_top10_delta;

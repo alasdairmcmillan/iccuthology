@@ -580,6 +580,8 @@ slop, documented here so nobody litigates it later.
     "heuristic": {"kind": "statistical", "n_shows": 3, "hit_rate_top20": 0.55,
                   "recall": 0.41, "brier": 0.09, "log_loss": 0.29,
                   "avg_n_rows": 37.5,                // mean shortlist length over scored shows
+                  "status": "active",                // "active" | "eliminated" — see below
+
                   "setlist": {                       // absent when no setlist-scored shows
                     "n_shows": 2, "hit_rate": 0.44, "placed_rate": 0.61,
                     "weighted_score": 0.55,          // unweighted mean of per-show weighted_score
@@ -596,10 +598,47 @@ slop, documented here so nobody litigates it later.
                     "n_shows": 3,                    //   shows where BOTH this model and heuristic scored
                     "hit_rate_top20_delta": 0.05,    // mean(model - heuristic)
                     "recall_delta": 0.09
-                  }}
+                  }},
+    "mcp:claude-haiku": {"kind": "mcp", "n_shows": 10, "hit_rate_top20": 0.155,
+                  "recall": 0.277, "brier": 0.138, "log_loss": 0.31, "avg_n_rows": 27.4,
+                  "status": "eliminated",            // track retired; record preserved
+                  "eliminated_at": "2026-08-18",     // present only when eliminated
+                  "eliminated_reason": "Last of six tracks on every scored metric ..."}
   }
 }
 ```
+
+**Track lifecycle (`models[*].status`).** The scoreboard has no static roster —
+every source key that appears in any scorecard becomes a model entry — so a
+track is never removed, it is marked. `status` is `"active"` or `"eliminated"`;
+`eliminated_at` (ISO date) and `eliminated_reason` (one public-facing line)
+appear only on eliminated entries. `build_scoreboard` stamps all three from
+`phishpred.tracks.ELIMINATED`, which is the single source of truth; editing that
+dict is the entire operation. An eliminated track keeps its full scored history
+— elimination is a status, not a deletion, and its scorecards stay scoreable and
+addressable exactly as before.
+
+`status` is written for every model going forward, so consumers need not treat
+absence as meaningful. Artifacts published before the field existed do lack it
+and cannot be rewritten retroactively; `web/src/api.ts` defaults those to
+`"active"` on ingest, alongside the other legacy normalizations.
+
+The bar for elimination is deliberately high and **conjunctive** — a track must
+BOTH (1) perform really poorly against the statistical baseline on its scored
+record AND (2) be failing the actual task of producing a genuinely reasoned
+hypothetical setlist that tries to beat the heuristic. Either alone is
+insufficient. A track that reasons honestly but loses to the baseline is a
+calibration problem to work on. A track whose output merely *looks* mechanical
+may still be performing fine: judged on submission forensics alone `gemini-flash`
+appeared formulaic while scoring level with the heuristic on hit rate and 2nd of
+six on weighted score.
+
+UI treatment (`StandingsBoard`, `ModelStandingsPanel`): eliminated tracks sort
+below every active one regardless of the selected metric, render dimmed with an
+`ELIMINATED` tag (the reason and date in a popover), and are **excluded from the
+◆ per-metric lead mark** — Brier rewards timid probabilities, so an
+under-summing eliminated track can otherwise hold the best Brier on the board
+purely as an artifact of the calibration failure that retired it.
 `setlist.marquee_calls`/`exact_calls`/`sharpshooters` are TOTALS over scored
 shows (they're counting stats); `hit_rate`/`placed_rate`/`weighted_score` are
 unweighted means.
