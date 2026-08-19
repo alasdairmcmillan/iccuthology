@@ -5,16 +5,33 @@ from phishpred.db import get_connection
 from phishpred.mcp import tools
 from phishpred.probs import renormalize_to_k
 
-def get_rationales():
-    return {
-        "2026-07-27": "With massive tentpole jams like Tweezer, DWD, Maze, and Bowie taken off the board in the first three MSG nights, N4 is ripe for You Enjoy Myself, Ghost, and Sand. We heavily discount all prior nights in the run, focusing on remaining catalog staples that are overdue for this residency.",
-        "2026-07-29": "The grand finale of the 5-night MSG stand. The available pool of high-rotation songs is significantly depleted after four nights. We explicitly avoid anything from 7-22 through 7-27 and expect a triumphant, celebratory encore to cap off the residency.",
-        "2026-07-31": "Moving to Boston for a stadium show at Fenway! The rotation is fully reset after the MSG run. We anticipate grand stadium-sized rockers and anthems, heavily weighing standard rotation tracks like Free and Character Zero to match the outdoor energy.",
-        "2026-08-01": "Closing out the Boston stop on a Saturday night. We explicitly avoid Fenway N1's setlist and project a high-energy stadium show, leaning into deep second-set jam vehicles and heavy hitters saved for the closer.",
-        "2026-09-04": "The traditional Labor Day weekend at Dick's always brings a unique energy. After a month-long break since Fenway, rotation is completely reset. We expect a massive statement opener and heavily weigh fan-favorites to kick off the weekend in Commerce City.",
-        "2026-09-05": "Saturday night at Dick's is historically one of the most anticipated shows of the year. We eliminate Dick's N1 songs and lean into deep, dark jam vehicles for the second set, keeping in mind Dick's historic propensity for surprises.",
-        "2026-09-06": "The summer tour finale at Dick's. With the first two nights excluded, the pool is primed for the remaining biggest anthems. We project an emotional closer and a multi-song encore to cap off the summer on a massive high note."
-    }
+def generate_dynamic_rationale(showdate, run_nights, all_played_in_run, top_3_names, venue_name, venue_boosts):
+    night_idx = next((i for i, n in enumerate(run_nights) if n["showdate"] == showdate), 0) + 1
+    total_nights = len(run_nights)
+    
+    venue_flavor = ""
+    if "Fenway" in venue_name:
+        venue_flavor = " Moving to Boston for a stadium show at Fenway, we anticipate grand stadium-sized rockers and anthems."
+    elif "Dick's" in venue_name:
+        venue_flavor = " The traditional Labor Day weekend at Dick's always brings a unique energy, with historically high propensity for surprises and massive jams."
+
+    if total_nights > 1:
+        if night_idx == 1:
+            base = f"Opening night of the {total_nights}-night {venue_name} run.{venue_flavor} The rotation is reset, so we expect a mix of heavy hitters and tone-setting jams to kick off the stand."
+        elif night_idx == total_nights:
+            base = f"The grand finale of the {total_nights}-night {venue_name} stand.{venue_flavor} The pool is significantly depleted, so we explicitly avoid the {len(all_played_in_run)} songs already called for prior nights."
+        else:
+            base = f"Night {night_idx} of the {total_nights}-night {venue_name} residency.{venue_flavor} We heavily discount the {len(all_played_in_run)} songs already played this run to maintain joint consistency."
+    else:
+        base = f"A single-night stop at {venue_name}.{venue_flavor} The catalog is wide open, allowing us to rely on standard era base rates."
+        
+    boost_str = ""
+    if venue_boosts:
+        boost_str = f" We've explicitly boosted historically strong venue performers."
+        
+    due_str = f" Key due tracks driving the probability mass include {', '.join(top_3_names)}."
+    
+    return base + boost_str + due_str
 
 def run_prediction():
     conn = get_connection("data/phish.db")
@@ -26,7 +43,7 @@ def run_prediction():
         
     model_label = "gemini-pro"
     predicted_setlists = {}
-    rationales = get_rationales()
+    
     
     for i, show in enumerate(upcoming):
         showdate = show["showdate"]
@@ -176,17 +193,11 @@ def run_prediction():
         
         # Append some top specific song references into the rationale to make it highly specific to the tool outputs
         top_3_names = [c["song_name"] for c in shortlist_candidates[:3]]
-        base_rationale = rationales.get(showdate, "A standard tour stop. We rely on the established era base rates.")
         
-        discounts_str = ""
-        if len(simulated_played_in_run_slugs) > 0:
-            discounts_str = f" We explicitly discount the {len(simulated_played_in_run_slugs)} songs called in our previous night(s)' setlist(s) for this run."
-        elif len(played_in_run_slugs) > 0:
-            discounts_str = f" We discount the {len(played_in_run_slugs)} songs already played this run."
-            
-        due_str = f" Key due tracks driving the probability mass include {', '.join(top_3_names)}."
-        
-        rationale = f"{base_rationale}{discounts_str}{due_str}"
+        venue_boosts = venue_shows >= 5
+        rationale = generate_dynamic_rationale(
+            showdate, run_nights, all_played_in_run, top_3_names, venue_name, venue_boosts
+        )
         
         res = tools.submit_prediction(
             showdate=showdate,
