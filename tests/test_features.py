@@ -10,7 +10,7 @@ import random
 
 import pytest
 
-from phishpred import db
+from phishpred import db, features
 from phishpred.features import (
     FEATURE_COLUMNS,
     RECENT_RATE_WINDOW,
@@ -373,6 +373,110 @@ def test_future_show_venue_gap_uses_canonical_venue(conn):
     # Beta shows so far: idx2, idx3, idx8, idx9 (n_v = 4).
     # Bathtub last played at Beta at idx8 (3rd Beta show) -> gap = 4 - 3 = 1.
     assert _row(df, 10, 104)["venue_gap"] == 1
+
+
+# --------------------------------------------------------------------------
+# Horizon: scheduled-but-unplayed shows are not evidence of a miss
+# --------------------------------------------------------------------------
+# Three consecutive future nights at Gamma, so ranks 0/1/2 differ only in how far
+# ahead they sit -- same venue, same tour, no run carried over from Beta.
+HORIZON = [
+    (11, None, "2010-07-17", 3, 101),
+    (12, None, "2010-07-18", 3, 101),
+    (13, None, "2010-07-19", 3, 101),
+]
+
+
+@pytest.fixture()
+def horizon_conn():
+    c = db.get_connection(":memory:")
+    db.init_db(c)
+    _populate(c, SHOWS, SETLISTS)
+    # A song played on three consecutive nights (idx7/8/9) -> median gap 1. Its
+    # capped gap stays 1 out at rank 1+, so it is the case that distinguishes a real
+    # "played the previous show" from one inferred across an unobserved show.
+    c.execute(
+        "INSERT INTO songs (songid, slug, name, is_original) VALUES (108,'nightly','Nightly',1)"
+    )
+    for showid in (8, 9, 10):
+        c.execute(
+            "INSERT INTO performances (showid, songid, set_label, position) "
+            "VALUES (?,108,'1',9)",
+            (showid,),
+        )
+    for showid, _idx, date, vid, tour in HORIZON:
+        c.execute(
+            "INSERT INTO shows (showid, showdate, venueid, tourid, show_index, exclude) "
+            "VALUES (?,?,?,?,NULL,0)",
+            (showid, date, vid, tour),
+        )
+    c.commit()
+    yield c
+    c.close()
+
+
+def _horizon_frames(conn):
+    """rank -> candidate frame, for the three scheduled Gamma nights."""
+    return {
+        rank: features_for_future_show(conn, showid=sid, half_life=50)
+        for rank, sid in enumerate((11, 12, 13))
+    }
+
+
+def test_gap_does_not_grow_across_unobserved_shows(horizon_conn):
+    """A show further out must not read as more 'overdue'.
+
+    The shows scheduled in between carry no setlist, so counting them into the gap
+    asserts the song went unplayed at every one of them. That is the bug that made
+    the heuristic escalate Harry Hood from .14 to .29 across a ten-show horizon,
+    when the rotation-correct expectation is the opposite: by the far end of a tour
+    a ~25%-per-show song has most likely already been played and reset.
+    """
+    frames = _horizon_frames(horizon_conn)
+    # YEM was played at idx9, the last observed show; its median historical gap is 2.
+    gaps = [_row(frames[r], 10 + r, 102)["gap"] for r in range(3)]
+    assert gaps[0] == 1, "the very next show is fully observed, so gap is exact"
+    assert gaps == sorted(gaps), f"gap must never decrease with distance: {gaps}"
+    assert max(gaps) <= 2, f"gap must saturate at the median spacing, got {gaps}"
+    assert gaps[1] == gaps[2], f"gap must stop growing once saturated: {gaps}"
+
+
+def test_played_prev_show_not_asserted_across_unobserved_shows(horizon_conn):
+    """Only rank 0 knows what the immediately preceding show played.
+
+    Song 108 ran idx7/8/9, so its median gap is 1 and its capped gap stays 1 at every
+    rank. Without the explicit horizon guard that would read as "played the previous
+    show" for a night whose predecessor has not happened yet.
+    """
+    frames = _horizon_frames(horizon_conn)
+    flags = [_row(frames[r], 10 + r, 108)["played_prev_show"] for r in range(3)]
+    assert flags == [1, 0, 0], flags
+    # ...and the capped gap really is 1 throughout, so the guard is what does the work.
+    assert [_row(frames[r], 10 + r, 108)["gap"] for r in range(3)] == [1, 1, 1]
+
+
+def test_recent_play_windows_anchor_on_observed_history(horizon_conn):
+    """plays_last_* counts real history, not a window slid past unplayed shows."""
+    frames = _horizon_frames(horizon_conn)
+    counts = [_row(frames[r], 10 + r, 102)["plays_last_10"] for r in range(3)]
+    assert len(set(counts)) == 1, f"plays_last_10 drifted with horizon: {counts}"
+
+
+def test_candidate_pool_is_stable_across_the_horizon(horizon_conn, monkeypatch):
+    """Eligibility keys off observed history, so the pool cannot thin with distance.
+
+    This matters downstream: the heuristic renormalises its vector to the expected
+    setlist size, so songs silently dropped from the pool inflate every survivor's
+    probability -- an escalation with no feature-level cause. On real data the pool
+    slid 418 -> 414 over a ten-show horizon; the eligibility cutoff is 300 shows, far
+    beyond this fixture's reach, so shrink it to put the fixture's songs astride the
+    boundary and make the drift observable.
+    """
+    monkeypatch.setattr(features, "_RECENT_WINDOW", 2)
+    frames = _horizon_frames(horizon_conn)
+    sizes = [len(frames[r]) for r in range(3)]
+    assert len(set(sizes)) == 1, f"candidate pool drifted with horizon: {sizes}"
+    assert sizes[0] > 0, "fixture must keep some songs eligible for this to mean anything"
 
 
 # --------------------------------------------------------------------------
