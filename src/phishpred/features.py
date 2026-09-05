@@ -171,14 +171,24 @@ class _State:
 
     def emit(self, cols: dict[str, list], *, index: int, showid: int, showdate: str,
              venueid: int, tourid, era: str, run_start_index, D: float,
-             y_setlist: set[int] | None) -> None:
+             y_setlist: set[int] | None, unobserved_since: int = 0) -> None:
         """Append one candidate row per eligible song for the show at ``index``.
 
         ``y_setlist`` = the show's distinct songids for a training show (y in {0,1}),
         or ``None`` for a future show (y = NaN).
+
+        ``unobserved_since`` = how many scheduled-but-unplayed shows sit between the
+        last show folded into this state and ``index``. It is 0 whenever the state is
+        current (training sweeps, and simulation, which applies each sampled show), and
+        equals the target's rank for a far-future show predicted directly off today's
+        history. History-relative features (gap, gap_ratio, played_prev_show,
+        plays_last_*) are measured against the last OBSERVED show rather than ``index``
+        so that unplayed shows are never counted as evidence the song went unplayed.
         """
         r = self.r
         meta = self.songs_meta
+        # Horizon of actual knowledge: the show right after the last observed one.
+        hist_index = index - unobserved_since
         n_v = self.venue_show_count.get(venueid, 0)
         era_shows_prior = self.era_show_count.get(era, 0)
         era_denom = era_shows_prior if era_shows_prior > 0 else 1
@@ -186,9 +196,29 @@ class _State:
 
         for s in sorted(self.ever_played):
             lp = self.last_played[s]
-            gap = index - lp
+            raw_gap = index - lp
             pcount = self.plays[s]
-            if gap > _RECENT_WINDOW and pcount < _BUSTOUT_PLAYS:
+
+            # Shows scheduled between the last observed show and this one carry no
+            # setlist, so counting them into the gap asserts the song went unplayed at
+            # every one of them - an assertion with no evidence behind it, and a false
+            # one for most of the rotation. Past roughly one typical spacing the song
+            # has more likely than not been played and reset, so cap the gap there:
+            # gap_ratio saturates near 1.0 (neutral) instead of climbing show after
+            # show and manufacturing a bustout signal that points the wrong way.
+            gap = raw_gap
+            if unobserved_since > 0 and self.gaps[s]:
+                gap = min(raw_gap, max(1, round(self.median_gap[s])))
+
+            # Eligibility asks a different question - "was this song still alive as of
+            # the last show we actually have?" - so it keys off the observed elapsed
+            # count, which is fixed no matter how far ahead the target sits. Left on
+            # the raw count it drops a few more borderline songs per extra show of
+            # horizon, and since the heuristic renormalises the vector to the expected
+            # setlist size, that quietly inflates every surviving song's probability.
+            # (The median cap above must NOT be used here: it would pull long-dormant
+            # songs with tightly clustered historical plays back into the pool.)
+            if (hist_index - lp) > _RECENT_WINDOW and pcount < _BUSTOUT_PLAYS:
                 continue
 
             numv = self.num[s] * (r ** (index - lp))
@@ -199,7 +229,9 @@ class _State:
             else:
                 gap_ratio = 1.0
 
-            played_prev = 1 if gap == 1 else 0
+            # Whether the immediately preceding show played this song is unknowable
+            # once that show is unobserved; fall back to the common case.
+            played_prev = 1 if (raw_gap == 1 and unobserved_since == 0) else 0
             played_run = 1 if (run_active and lp >= run_start_index) else 0
 
             k = self.venue_last_ordinal.get((venueid, s))
@@ -207,10 +239,13 @@ class _State:
 
             plays_tour = self.tour_play_count.get((tourid, s), 0) if tourid is not None else 0
 
+            # Recent-play windows anchor on observed history too: sliding them out to
+            # ``index`` would age plays out of the last-10 window on the strength of
+            # shows that have not happened yet.
             pl = self.play_indexes[s]
-            plays10 = len(pl) - bisect_left(pl, index - _WINDOW_10)
-            plays50 = len(pl) - bisect_left(pl, index - _WINDOW_50)
-            plays150 = len(pl) - bisect_left(pl, index - _WINDOW_150)
+            plays10 = len(pl) - bisect_left(pl, hist_index - _WINDOW_10)
+            plays50 = len(pl) - bisect_left(pl, hist_index - _WINDOW_50)
+            plays150 = len(pl) - bisect_left(pl, hist_index - _WINDOW_150)
 
             age = index - self.first_play[s]
             era_rate = self.era_song_plays.get((era, s), 0) / era_denom
@@ -298,18 +333,22 @@ def build_state_to_now(conn: sqlite3.Connection, half_life: int = 50):
 
 def emit_candidate_frame(
     state: _State, *, index: int, showid: int, showdate: str, venueid: int,
-    tourid, era: str, run_start_index, D: float,
+    tourid, era: str, run_start_index, D: float, unobserved_since: int = 0,
 ) -> pd.DataFrame:
     """Candidate rows (y = NaN) for one show at ``index``, given a ``_State``
     already advanced up to (but not including) that show.
 
     Wraps the body of ``_State.emit`` into a DataFrame. ``features_for_future_show``
-    calls this once; ``simulate.py`` calls it once per simulated horizon step
-    (on a *copy* of the state so sampling doesn't mutate other simulations).
+    calls this once, passing ``unobserved_since`` = the target's rank among upcoming
+    shows, since its state stops at the last played show; ``simulate.py`` calls it
+    once per simulated horizon step (on a *copy* of the state so sampling doesn't
+    mutate other simulations) and leaves the default 0, because it folds each sampled
+    setlist in as it goes and its state is therefore current at every step.
     """
     cols = _new_cols()
     state.emit(cols, index=index, showid=showid, showdate=showdate, venueid=venueid,
-               tourid=tourid, era=era, run_start_index=run_start_index, D=D, y_setlist=None)
+               tourid=tourid, era=era, run_start_index=run_start_index, D=D,
+               y_setlist=None, unobserved_since=unobserved_since)
     return pd.DataFrame(cols)[_ALL_COLUMNS]
 
 
@@ -447,7 +486,7 @@ def features_for_future_show(
     return emit_candidate_frame(
         state, index=eff_index, showid=showid, showdate=target["showdate"],
         venueid=target["venueid"], tourid=target["tourid"], era=era,
-        run_start_index=run_start, D=D_eff,
+        run_start_index=run_start, D=D_eff, unobserved_since=rank,
     )
 
 
